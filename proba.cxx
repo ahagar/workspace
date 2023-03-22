@@ -1,1862 +1,714 @@
-/***********************************************************
- *
- * Čita .slcio fajlove. Program korišćen za kreiranje aplikacije i treninga u H->gamma gamma analizi
- *
- *  Author:Goran Kačarević
- *  19.02.2018.
- *
- *
- ***********************************************************/
-
-
+// ee -> H -> ee
+// Napravljen dana: 26.03.2018.
+// Autor: Natasa
+// Modifikovao MIRKO dana 7.01.2021.
 
 #ifndef __CINT__
-#include "TROOT.h"
-#include "TFile.h"
-#include "Riostream.h"
-#include "TFile.h"
-#include "TH1.h"
-#include "TH2.h"
-#include "TVectorT.h"
-#include "TCanvas.h"
-#include "TLegend.h"
-#include "TStyle.h"
-#include "TString.h"
-#include "TPostScript.h"
-#include "TLatex.h"
-#include "TLorentzVector.h"
-#include "TTree.h"
-#include "TMath.h"
-#include "Riostream.h"
-#include "TGraph.h"
-#include "TRandom3.h"
+	#include "TROOT.h"
+	#include "TFile.h"
+	#include "Riostream.h"
+	#include "TH1.h"
+	#include "TH2.h"
+	#include "TVectorT.h"
+	#include "TCanvas.h"
+	#include "TLegend.h"
+	#include "TStyle.h"
+	#include "TString.h"
+	#include "TPostScript.h"
+	#include "TLatex.h"
+	#include "TLorentzVector.h"
+	#include "TTree.h"
+	#include "TMath.h"
+	#include "TGraph.h"
+	#include "math.h"
 
+	// LCIO includes
+	#include <lcio.h>
+	#include <IOIMPL/LCFactory.h>
+	#include <IMPL/LCCollectionVec.h>
+	#include <EVENT/MCParticle.h>
+	#include <EVENT/ReconstructedParticle.h>
+	#include <IMPL/CalorimeterHitImpl.h>
+	#include <IMPL/MCParticleImpl.h>
+	#include <IMPL/ReconstructedParticleImpl.h>
+	#include <UTIL/LCRelationNavigator.h>
+	#include <EVENT/LCRelation.h>
+	#include <UTIL/LCTOOLS.h>
+	#include <Exceptions.h>
+	#include <IMPL/MCParticleImpl.h>
+	#include <pre-generated/EVENT/LCRelation.h>
+	#include <UTIL/PIDHandler.h>
 
-// LCIO includes
-#include "lcio.h"
-#include <IOIMPL/LCFactory.h>
-#include <IMPL/LCCollectionVec.h>
-#include <EVENT/MCParticle.h>
-#include <IMPL/MCParticleImpl.h>
-#include <IMPL/ReconstructedParticleImpl.h>
-#include "EVENT/ReconstructedParticle.h"
-#include <UTIL/LCTOOLS.h>
-#include <Exceptions.h>
-#include "EVENT/LCCollection.h"
-#include "EVENT/LCEvent.h"
-#include "EVENT/LCRelation.h"
-#include "IO/LCReader.h"
 #endif
 
-#include "stdlib.h"
-#include "CandidateData.h"
+#include <stdlib.h>
 #include <sstream>
 #include <iostream>
 #include <iterator>
 #include <fstream>
-#include <cassert>
-
-
-#include "varList.h"
-#include "utils.h"
+#include <vector>
+#include <array>
 
 using namespace std;
 
+//     --------------------    RecoMCTruth Link    --------------------
 
-TRandom3 rnd;
-
-const Double_t minPt1 = 15;			   //minimalna energija fotona
-const Double_t minPt2 = 10;			   //minimalna energija fotona
-const Double_t minPt3 = 11;			   //minimalna energija fotona
-const Double_t minPt4 = 12;			   //minimalna energija fotona
-
-const double mH = 126.0;               //Higgs mass
-const double photonSize = 2;
-const Double_t coneAngle = 2.5;		   //ugao konusa
-const Double_t maxConeEnergy = 20 ;	   //maksimalna energija konusa
-const Double_t leptonPt = 20000;		   //energija leptona posle koje zadovoljavaju uslov leptonFound
-const Double_t EnergyCenterMass = 3000; // energija u sistemu centra masa, koju koristim za missing energy
-const Double_t minInvMass = 0;
-const Double_t maxInvMass = 1400000;
-const Double_t cutEremaining = 100;
-const Double_t cutHiggsPt = 20;
-const Double_t cutEhiggsMin = 100;
-const Double_t cutEhiggsMax = 1000;
-const Double_t cutCosinusHelicity = 0.9;
-const Double_t minhiggsInvM = 110;
-const Double_t maxhiggsInvM = 140;
-const Double_t minTheta = 2;
-
-
-
-
-//funkcija koja proverava koji par fotona je najbolji kandidat za rekonstrukciju Higgsa
-bool IsBetterHiggsCandidate(CandidateData a, CandidateData b)
+Int_t slcio2appTree(UInt_t nPrviFajl, UInt_t nZadnjiFajl, const char* fn, const char* rfn)
 {
-	TLorentzVector higgsA = a.Higgs();
-	TLorentzVector higgsB = b.Higgs();
+	#ifdef __CINT__
+		gSystem -> Load("${LCIO}/lib/liblcio.so");
+		gSystem -> Load("${LCIO}/lib/liblcioDict.so");
+	#endif
 
-	Double_t distanceA = fabs(higgsA.M() - mH);
-	Double_t distanceB = fabs(higgsB.M() - mH);
-	if (distanceA < distanceB)
-	{
-		return true;
-	}
-
-	return false;
-}
-
-//function that calculates summ of energies from given collection
-Double_t SumCalorimeterHitEnergies(EVENT::LCCollection* calHitCollection)
-{
-	Double_t result = 0;
-
-	for (Int_t i = 0; i < calHitCollection->getNumberOfElements(); i++)
-	{
-		EVENT::CalorimeterHit* calHit = (EVENT::CalorimeterHit*)calHitCollection->getElementAt(i);
-		result += calHit->getEnergy();
-		//double *pos = calHit->getPosition();
-		// da li je pos NULL?
-		//double x = pos[0];
-	}
-
-	return result;
-}
-
-
-Int_t slcio2appTree(UInt_t nFirstJob, UInt_t nLastJob, const char * fn, const char * rfn)
-{
-#ifdef __CINT__
-	gSystem->Load("${LCIO}/lib/liblcio.so");
-	gSystem->Load("${LCIO}/lib/liblcioDict.so");
-#endif
-
-
-	//gROOT->ProcessLine(".x /home/Goran/Programs/crtanje_histograma/crtanje/histogrami/CLICdpStyle.C");
-	//histogrami za različite kinematičke varijable
-	TH1F histoTheta ("histoTheta", "Theta; #theta_{#gamma}", 90, 0, 180);
-	TH1F histoPhi ("histoPhi", "Phi; #phi_{#gamma}", 50, 0, 3.14);
-	TH1F energyOfPhotons ("energyOfPhotons", "PhotonEnergy; E_{#gamma} (GeV)", 3000, 0, 3000);
-	TH1F histoCandidateM ("CandidateInvariantM", "CandidateInvariantM; M_{#gamma#gamma} (GeV)", 3000, 0, 3000);
-	TH1F histoCandidatePt ("CandidatePt", "CandidatePt; Pt_{#gamma#gamma} (GeV)", 3000, 0, 3000);
-	TH1F histoRemainingEnergy ("Remaining_Visible_Energy", "Remaining_Visible_Energy; E_{remaining visible} (GeV)", 3000, 0, 3000);
-	TH1F histoCandidateEnergy ("CandidateE", "CandidateE; E_{#gamma#gamma} (GeV)",3000, 0, 3000);
-	TH1F histoCanditateTheta ("CandidateTheta", "CandidateTheta; #theta_{H}", 90, 0, 180);
-	TH1F histoCandidatePhi ("CandidatePhi", "CandidatePhi' #phi_{#gamma}", 50, 0, 3.14);
-	TH1F histoBoost ("CandidateBoost", "CandidateBoost; #beta_{#gamma#gamma}", 180, 0, 1);
-	TH1F histoZbirPt ("ZbirPt", "ZbirPt; Pt_{1} + Pt_{2}", 300, 0, 3000);
-	TH1F histoHigherEnergyPhoton ("HigherEnergyPhoton", "HigherEnergyPhoton; E_{#gamma1}", 3000, 0, 3000);
-	TH1F histoLowerEnergyPhoton ("LowerEnergyPhoton", "LowerEnergyPhoton; E_{#gamma2}", 3000, 0, 3000);
-	TH1F histoCosinusHelicityAngle ("cosinus_helicity_angle", "cosinus_helicity_Angle; cos_{#theta}", 50, 0, 1);
-	TH1F histoHelicityAngle ("helicity_angle", "helicity_angle; #theta", 90, 0, 3.15);
-	TH2F histogram ("test","title", 20, 0, 180, 20, 0, 180);
-	TH1F histoangleBetweenPhotons ("angleBetweenPhotons", "angleBetweenPhotons; #alpha", 90, 0, 3.14);
-	TH1F histoNumberPhotonsbyEvent ("Number of Photons by Event", "Number of Photons by Event", 10, 0, 10);
-	TH1F anglePhotonParticle ("Angle Between photon and particle", "angle photon particle", 20, 0, 20);
-	TH1F histoconeEnergy ("ConeEnergy", "ConeEnergy; E_{cone} (GeV)", 100, 0, 100);
-	TH1F anglePhotonParticlewE ("AngleBetweenphotonandparticle wE", " photonParticleAngleWE", 20, 0, 20);//otezinjeno sa Energijom
-	TH1F histoconeEnergyFilter ("ConeEnergyFilter", "ConeEnergyFilter; E_{cone} (GeV)", 100, 0, 20);
-	TH1F histoHardPhotonsByEvent ("HardPhotonsbyEvent", "HardPhotonsbyEvent", 10, 0, 10);
-	TH1F histoPtOtherParticles ("PtOtherParticles", "PtOtherParticles; Pt (GeV)", 100, 0, 20);
-	TH1F histoMissingEnergy ("MissingEnergy", "MissingEnergy; E_{miss} (GeV)", 3000, 0, 3000);
-	TH1F histoTestPt ("TestPt", "TestPt; Pt (GeV)", 50, 0, 50);
-	TH1F histoTheta1Photon ("histoTheta", "ThetaofcandidatePhoton; #theta_{#gamma}", 50, 0, 3.14);
-	TH1F histoTheta2Photon ("histoTheta2", "Theta; #theta_{#gamma}", 50, 0, 3.14);
-    TH1F histoPhoton1CandidateTheta ("Thetaof1stPhotonofCandidate", "Thetaof1stPhotonofCandidate; #theta_{#gamma}", 180, 0, 180 );
-    TH1F histoPhoton2CandidateTheta ("Thetaof2ndPhotonofCandidate", "Thetaof2ndPhotonofCandidate; #theta_{#gamma}", 180, 0, 180 );
-	TH1F histoPtof1stPhotonofCandidate ("Ptof1stPhotonofCandidate", "Ptof1stPhotonofCandidate; Pt (GeV)", 3000, 0, 3000);
-	TH1F histoPtof2ndPhotonofCandidate ("Ptof2ndPhotonofCandidate", "Pt of 2nd Photon of Candidate; Pt (GeV)", 3000, 0, 3000);
-	TH1F histoHighestPhotonPt ("HighestPhotonPt", "HighestPhotonPt; Pt (GeV)", 250, 0, 500);//najveći pT od fotona koju prodju Pt cut
-	TH1F histo2ndHighestPhotonPt ("2ndHighestPhotonPt", "2ndHighestPhotonPt; Pt (GeV)", 1000, 0, 1000);//drugi najveći Pt od fotona koji prodju pt cut
-	TH1F histo2ndHighestPhotonPtZoomed ("2ndHighestPhotonPtZoomed", "2ndHighestPhotonPtZoomed; Pt (GeV)", 50, 0, 50);//drugi najveći Pt od fotona koji prodju pt cut
-	TH1F histoVisibleEnergy ("Visible_Energy", "Visible_Energy; E_{vis}(GeV)", 300, 0, 3000);
-	TH1F histoZbirImpulsa ("zbir_impulsa", "zbir_impulsa; Pt_{hel}(GeV)", 100, 0, 1);
-	TH1F histoCandidateMFineBinning ("histoCandidateMFineBinning", "histoCandidateMFineBinning; M_{H} (GeV)", 50, 125, 135);
-	TH1F ptOfPhotons ("ptOfPhotons", "ptOfPhotons; Pt_{#gamma} (GeV)", 500, 0, 500);
-	TH1F thetaOfPhotons ("thetaOfPhotons", "thetaOfPhotons; #theta_{#gamma}", 180, 0, 180);
-	TH1F thetaOfHiggsPhotons ("thetaOfHiggsPhotons", "thetaOfHiggsPhotons; #theta_{#gamma}", 90, 0, 180);
-	//TH1F energyOfPhotons ("energyOfPhotons", "energyOfPhotons; E_{#gamma} (GeV)", 150, 0, 1500);
-	TH1F pLOfPhotons ("pLOfPhotons", "pLOfPhotons; Pz_{#gamma} (GeV)", 250, 0, 500);
-	//TH1F thetaOfPhotons ("thetaOfPhotons", "thetaOfPhotons; #theta_{#gamma}", 90, 0, 180);
-	TH1F PtofCandidatePhotons ("PtofCandidatePhotons", "PtofCandidatePhotons; Pt_{#gamma} (GeV)", 3000, 0, 3000);
-	TH1F energyofCandidatePhotons ("energyofCandidatePhotons", "energyofCandidatePhotons; E_{#gamma} (GeV)", 3000, 0, 3000);
-	TH1F thetaOfCandidatePhotons ("thetaOfCandidatePhotons", "thetaOfCandidatePhotons; #theta_{#gamma}", 90, 0, 180);
-	TH1F energyofCandidatePhotonsZoomed ("energyofCandidatePhotonsZoomed", "energyofCandidatePhotonsZoomed; E_{#gamma} (GeV)", 6, 0, 30);
-	TH1F PtofCandidatePhotonsZoomed ("PtofCandidatePhotonsZoomed", "PtofCandidatePhotonsZoomed; Pt_{#gamma} (GeV)", 6, 0, 30);
-	TH1F histoconeEnergyfor2Photons ("ConeEnergy2Photons", "ConeEnergy; E_{cone} (GeV)", 100, 0, 100);
-	TH1F angleBetweenPhotons ("angle_between_photons", "angle photon particle", 180, 0, 180);
-
-	//after preselection
-	TH1F histoCandidateM_preselectionCut ("CandidateInvariantM_preselectionCut", "CandidateInvariantM; M_{#gamma#gamma} (GeV)", 3000, 0, 3000);
-	TH1F histoCandidatePt_preselectionCut ("CandidatePt_preselectionCut", "CandidatePt; Pt_{#gamma#gamma} (GeV)", 3000, 0, 3000);
-	TH1F histoRemainingEnergy_preselectionCut ("Remaining_Visible_Energy_preselectionCut", "Remaining_Visible_Energy; E_{remaining visible} (GeV)", 3000, 0, 3000);
-	TH1F histoCandidateEnergy_preselectionCut ("CandidateE_preselectionCut", "CandidateE; E_{#gamma#gamma} (GeV)",3000, 0, 3000);
-	TH1F histoCanditateTheta_preselectionCut ("CandidateTheta_preselectionCut", "CandidateTheta; #theta_{H}", 90, 0, 180);
-	TH1F histoCandidatePhi_preselectionCut ("CandidatePhi_preselectionCut", "CandidatePhi' #phi_{#gamma}", 90, 0, 3.15);
-	TH1F histoBoost_preselectionCut ("CandidateBoost_preselectionCut", "CandidateBoost; #beta_{#gamma#gamma}", 180, 0, 1);
-    TH1F histoPhoton1CandidateTheta_preselectionCut ("Thetaof1stPhotonofCandidate_preselectionCut", "Thetaof1stPhotonofCandidate; #theta_{#gamma}", 180, 0, 180 );
-    TH1F histoPhoton2CandidateTheta_preselectionCut ("Thetaof2ndPhotonofCandidate_preselectionCut", "Thetaof2ndPhotonofCandidate; #theta_{#gamma}", 180, 0, 180 );
-	TH1F histoPtof1stPhotonofCandidate_preselectionCut ("Ptof1stPhotonofCandidate_preselectionCut", "Ptof1stPhotonofCandidate; Pt (GeV)", 3000, 0, 3000);
-	TH1F histoPtof2ndPhotonofCandidate_preselectionCut ("Ptof2ndPhotonofCandidate_preselectionCut", "Pt of 2nd Photon of Candidate; Pt (GeV)", 3000, 0, 3000);
-	TH1F histoHigherEnergyPhoton_preselectionCut ("HigherEnergyPhoton_preselectionCut", "HigherEnergyPhoton; E_{#gamma1}", 3000, 0, 3000);
-	TH1F histoLowerEnergyPhoton_preselectionCut ("LowerEnergyPhoton_preselectionCut", "LowerEnergyPhoton; E_{#gamma2}", 3000, 0, 3000);
-	TH1F histoCosinusHelicityAngle_preselectionCut ("cosinus_helicity_angle_preselectionCut", "cosinus_helicity_Angle; cos_{#theta}", 100, 0, 1);
-	TH1F histoVisibleEnergy_preselectionCut ("Visible_Energy_preselectionCut", "Visible_Energy; E_{vis}(GeV)", 3000, 0, 3000);
-	TH1F histoangleBetweenPhotons_preselectionCut ("angleBetweenPhotons_preselectionCut", "angleBetweenPhotons; #alpha", 180, 0, 180);
-
-
-
-	//totalEnergy in call preselection
-	TH1F histoECall ("ECall", "ECall; E_{ecal} (GeV)", 3000, 0, 3000);
-	TH1F histoHCall ("HCall", "HCall; E_{hcal} (GeV)", 3000, 0, 3000);
-	TH1F histoTotalCall ("EnergyCalorimeter", "EnergyCalorimeter; E_{calorimeter} (GeV)", 300, 0, 3000);
-	TH1F histoCallRatio ("calRatio", "calRatio ", 100, 0, 1);
-	TH1F histoECallEvt ("ECallEvt", "ECallEvt; E_{ecal} (GeV)", 1500, 0, 3000);
-	TH1F histoHCallEvt ("HCallEvt", "HCallEvt; E_{hcal} (GeV)", 1500, 0, 3000);
-	TH1F histoTotalCallEvt ("EnergyCalorimeterEvt", "EnergyCalorimeterEvt; E_{calorimeter} (GeV)", 300, 0, 3000);
-	TH1F histoCallRatioEvt ("calRatioEvt", "calRatioEvt ", 100, 0, 1);
-
-
-
-	//only two Photons with pt>10
-	TH1F histoECall_photons_preselection ("ECall_photons_preselection", "ECall; E_{ecal} (GeV)", 3000, 0, 3000);
-	TH1F histoHCall_photons_preselection ("HCall_photons_preselection", "HCall; E_{hcal} (GeV)", 3000, 0, 3000);
-	TH1F histoTotalCall_photons_preselection  ("EnergyCalorimeter_photons_preselection ", "EnergyCalorimeter; E_{calorimeter} (GeV)", 300, 0, 3000);
-	TH1F histoCallRatio_photons_preselection  ("calRatio_photons_preselection ", "calRatio ", 100, 0, 1);
-	TH1F histoECallEvt_photons_preselection  ("ECallEvt_photons_preselection ", "ECallEvt; E_{ecal} (GeV)", 1500, 0, 3000);
-	TH1F histoHCallEvt_photons_preselection  ("HCallEvt_photons_preselection ", "HCallEvt; E_{hcal} (GeV)", 1500, 0, 3000);
-	TH1F histoTotalCallEvt_photons_preselection  ("EnergyCalorimeterEvt_photons_preselection ", "EnergyCalorimeterEvt; E_{calorimeter} (GeV)", 300, 0, 3000);
-	TH1F histoCallRatioEvt_photons_preselection  ("calRatioEvt_photons_preselection ", "calRatioEvt ", 100, 0, 1);
-	TH1F histoCandidateM_photons_preselection ("CandidateInvariantM_photons_preselection", "CandidateInvariantM; M_{#gamma#gamma} (GeV)", 1000, 0, 1000);
-	TH1F histoCandidatePt_photons_preselection ("CandidatePt_photons_preselection", "CandidatePt; Pt_{#gamma#gamma} (GeV)", 1500, 0, 1500);
-	TH1F histoRemainingEnergy_photons_preselection ("Remaining_Visible_Energy_photons_preselection", "Remaining_Visible_Energy; E_{remaining visible} (GeV)", 1500, 0, 3000);
-	TH1F histoCandidateEnergy_photons_preselection ("CandidateE_photons_preselection", "CandidateE; E_{#gamma#gamma} (GeV)",1500, 0, 1500);
-	TH1F histoCanditateTheta_photons_preselection ("CandidateTheta_photons_preselection", "CandidateTheta; #theta_{H}", 90, 0, 180);
-	TH1F histoCandidatePhi_photons_preselection ("CandidatePhi_photons_preselection", "CandidatePhi' #phi_{#gamma}", 50, 0, 3.14);
-	TH1F histoPhoton1CandidateTheta_photons_preselection ("Thetaof1stPhotonofCandidate_photons", "Thetaof1stPhotonofCandidate_hcal; #theta_{#gamma}", 180, 0, 180 );
-	TH1F histoPhoton2CandidateTheta_photons_preselection ("Thetaof2ndPhotonofCandidate_photons", "Thetaof2ndPhotonofCandidate_hcal; #theta_{#gamma}", 180, 0, 180 );
-	TH1F histoPtof1stPhotonofCandidate_photons ("Ptof1stPhotonofCandidate_photons", "Ptof1stPhotonofCandidate; Pt (GeV)", 500, 0, 1000);
-	TH1F histoPtof2ndPhotonofCandidate_photons ("Ptof2ndPhotonofCandidate_photons", "Ptof1stPhotonofCandidate; Pt (GeV)", 500, 0, 1000);
-	TH1F angleBetweenPhotons_photons ("angle_between_photons_photons", "angle photon particle", 180, 0, 180);
-//Two photons + invM
-	TH1F histoECall_photonsInvM_preselection ("ECall_photonsInvM_preselection", "ECall; E_{ecal} (GeV)", 3000, 0, 3000);
-	TH1F histoHCall_photonsInvM_preselection ("HCall_photonsInvM_preselection", "HCall; E_{hcal} (GeV)", 3000, 0, 3000);
-	TH1F histoTotalCall_photonsInvM_preselection  ("EnergyCalorimeter_photonsInvM_preselection ", "EnergyCalorimeter; E_{calorimeter} (GeV)", 300, 0, 3000);
-	TH1F histoCallRatio_photonsInvM_preselection  ("calRatio_photonsInvM_preselection ", "calRatio ", 100, 0, 1);
-	TH1F histoECallEvt_photonsInvM_preselection  ("ECallEvt_photonsInvM_preselection ", "ECallEvt; E_{ecal} (GeV)", 1500, 0, 3000);
-	TH1F histoHCallEvt_photonsInvM_preselection  ("HCallEvt_photonsInvM_preselection ", "HCallEvt; E_{hcal} (GeV)", 1500, 0, 3000);
-	TH1F histoTotalCallEvt_photonsInvM_preselection  ("EnergyCalorimeterEvt_photonsInvM_preselection ", "EnergyCalorimeterEvt; E_{calorimeter} (GeV)", 300, 0, 3000);
-	TH1F histoCallRatioEvt_photonsInvM_preselection  ("calRatioEvt_photonsInvM_preselection ", "calRatioEvt ", 100, 0, 1);
-
-
-	//Two photons+E
-	TH1F histoECall_photonsEnergy_preselection ("ECall_photonsEnergy_preselection", "ECall; E_{ecal} (GeV)", 3000, 0, 3000);
-	TH1F histoHCall_photonsEnergy_preselection ("HCall_photonsEnergy_preselection", "HCall; E_{hcal} (GeV)", 3000, 0, 3000);
-	TH1F histoTotalCall_photonsEnergy_preselection  ("EnergyCalorimeter_photonsEnergy_preselection ", "EnergyCalorimeter; E_{calorimeter} (GeV)", 300, 0, 3000);
-	TH1F histoCallRatio_photonsEnergy_preselection  ("calRatio_photonsEnergy_preselection ", "calRatio ", 100, 0, 1);
-	TH1F histoECallEvt_photonsEnergy_preselection  ("ECallEvt_photonsEnergy_preselection ", "ECallEvt; E_{ecal} (GeV)", 1500, 0, 3000);
-	TH1F histoHCallEvt_photonsEnergy_preselection  ("HCallEvt_photonsEnergy_preselection ", "HCallEvt; E_{hcal} (GeV)", 1500, 0, 3000);
-	TH1F histoTotalCallEvt_photonsEnergy_preselection  ("EnergyCalorimeterEvt_photonsEnergy_preselection ", "EnergyCalorimeterEvt; E_{calorimeter} (GeV)", 300, 0, 3000);
-	TH1F histoCallRatioEvt_photonsEnergy_preselection  ("calRatioEvt_photonsEnergy_preselection ", "calRatioEvt ", 100, 0, 1);
-
-
-
-	//two  Photons with pt>10, upisuje se za sve evente
-
-		TH1F histoECall_pt_preselection ("ECall_pt_preselection", "ECall; E_{ecal} (GeV)", 3000, 0, 3000);
-		TH1F histoHCall_pt_preselection ("HCall_pt_preselection", "HCall; E_{hcal} (GeV)", 3000, 0, 3000);
-		TH1F histoTotalCall_pt_preselection  ("EnergyCalorimeter_pt_preselection ", "EnergyCalorimeter; E_{calorimeter} (GeV)", 300, 0, 3000);
-		TH1F histoCallRatio_pt_preselection  ("calRatio_pt_preselection ", "calRatio ", 100, 0, 1);
-		TH1F histoECallEvt_pt_preselection  ("ECallEvt_pt_preselection ", "ECallEvt; E_{ecal} (GeV)", 1500, 0, 3000);
-		TH1F histoHCallEvt_pt_preselection  ("HCallEvt_pt_preselection ", "HCallEvt; E_{hcal} (GeV)", 1500, 0, 3000);
-		TH1F histoTotalCallEvt_pt_preselection  ("EnergyCalorimeterEvt_pt_preselection ", "EnergyCalorimeterEvt; E_{calorimeter} (GeV)", 300, 0, 3000);
-		TH1F histoCallRatioEvt_pt_preselection  ("calRatioEvt_pt_preselection ", "calRatioEvt ", 100, 0, 1);
-
-		TH1F histoECall_def_2photons ("ECall_def_2photons", "ECall; E_{ecal} (GeV)", 3000, 0, 3000);
-		TH1F histoHCall_def_2photons ("HCall_def_2photons", "HCall; E_{hcal} (GeV)", 3000, 0, 3000);
-		TH1F histoTotalCall_def_2photons ("EnergyCall_def_2photons", "HCall; E_{callorimeter} (GeV)", 3000, 0, 3000);
-
-		TH1F histoCallRatio_def_preselection  ("calRatio_def_preselection ", "calRatio ", 100, 0, 1);
-		TH1F histoECallEvt_def_candidate  ("ECalEvtl_def_candidate ", "ECallEvt; E_{ecal} (GeV)", 3000, 0, 3000);
-		TH1F histoHCallEvt_def_candidate  ("HCallEvt_def_candidate ", "HCallEvt; E_{hcal} (GeV)", 3000, 0, 3000);
-		TH1F histoTotalCallEvt_def ("EnergyCallEvt_def", "EnergyCall; E_{callorimeter} (GeV)", 3000, 0, 3000);
-
-
-		TH1F histoTotalCallEvt_def_candidate  ("EnergyCalorimeterEvt_def_candidate ", "EnergyCalorimeterEvt; E_{calorimeter} (GeV)", 300, 0, 3000);
-		TH1F histoTotalCallEvt_def_2photons  ("EnergyCalorimeterEvt_def_2Photons ", "EnergyCalorimeterEvt; E_{calorimeter} (GeV)", 300, 0, 3000);
-		TH1F histoCallRatioEvt_def_preselection  ("calRatioEvt_def_preselection ", "calRatioEvt ", 100, 0, 1);
-
-		TH1F histoECall_test ("ECall_test", "ECall; E_{ecal} (GeV)", 3000, 0, 3000);
-		TH1F histoInvMEHigs ("CandidateInvariantMEhigs", "CandidateInvariantM; M_{#gamma#gamma} (GeV)", 3000, 0, 3000);
-		TH1F histoInvMInvM ("CandidateInvariantMInvM", "CandidateInvariantM; M_{#gamma#gamma} (GeV)", 3000, 0, 3000);
-		TH1F histoInvMPt  ("CandidateInvariantMPt", "CandidateInvariantM; M_{#gamma#gamma} (GeV)", 3000, 0, 3000);
-		TH1F histoInvMPreselection ("CandidateInvariantMPreselection", "CandidateInvariantM; M_{#gamma#gamma} (GeV)", 3000, 0, 3000);
-		TH1F histoInvMErem ("CandidateInvariantMERem", "CandidateInvariantM; M_{#gamma#gamma} (GeV)", 3000, 0, 3000);
-
-		TH1F ECE ("ECE", "ECE; E_{ecal} (GeV)", 5000, 0, 5000);
-		TH1F HCE  ("HCE", "HCE; E_{ecal} (GeV)", 5000, 0, 5000);
-		TH1F ECE_NotRepr ("ECE_notrep", "ECE_notrep; E_{ecal} (GeV)", 5000, 0, 5000);
-		TH1F HCE_NotRepr("HCE_notrep", "HCE_notrep; E_{hcal} (GeV)", 5000, 0, 5000);
-
-
-
-
-
-	TTree eventList("eventsSignal", "ILD event list");
-	varListGoran vl; /* SL specific */
-	eventList.Branch("invM", &(vl.CandidateInvariantM), "invM");
-	eventList.Branch("CanE", &(vl.CandidateEnergy), "CanE");
-	eventList.Branch("CanTheta", &(vl.CandidateTheta), "CanTHeta");
-	eventList.Branch("CanPt", &(vl.CandidatePt), "CanPt");
-	eventList.Branch("CanPhi", &(vl.CandidatePhi), "CanPhi");
-	eventList.Branch("photonsPerEvent", &(vl.NumberPhotonsbyEvent), "photonsPerEvent");
-	eventList.Branch("cos_hel_angle", &(vl.cosHelAngle), "cos_hel_angle");
-	eventList.Branch("energyPhotons", &(vl.energyOfAllPhotons), "energyPhotons");
-	eventList.Branch("thetaPhotons", &(vl.thetaOfAllPhotons), "thetaPhotons");
-	eventList.Branch("ptPhotons", &(vl.ptOfAllPhotons), "ptPhotons");
-	eventList.Branch("highestPt", &(vl.HighestPhotonPt), "highestPt");
-	eventList.Branch("2ndHighestPt", &(vl.secondHighestPhotonPt), "2ndHighestPt");
-	eventList.Branch("MissingE", &(vl.MissingEnergy), "MissingE");
-	eventList.Branch("ERem", &(vl.ERemaining), "ERem");
-	eventList.Branch("Evis", &(vl.EVisible), "Evis");
-	eventList.Branch("EcallE", &(vl.EcallEnergy), "EcallE");
-	eventList.Branch("HcallEnergy", &(vl.HcallEnergy), "HcallEnergy");
-	eventList.Branch("TotalcallEnergy", &(vl.TotalcallEnergy), "TotalcallEnergy");
-	eventList.Branch("pLCandidate", &(vl.pLCandidate), "pLCandidate");
-	eventList.Branch("pLCandidatePhotons1", &(vl.pLCandidatePhotons1), "pLCandidatePhotons1");
-	eventList.Branch("pLCandidatePhotons2", &(vl.pLCandidatePhotons2), "pLCandidatePhotons2");
-	eventList.Branch("thetaCandidatePhotons1", &(vl.thetaCandidatePhotons1), "thetaCandidatePhotons1");
-	eventList.Branch("thetaCandidatePhotons2", &(vl.thetaCandidatePhotons2), "thetaCandidatePhotons2");
-	eventList.Branch("pTCandidatePhotons1", &(vl.pTCandidatePhotons1), "pTCandidatePhotons1");
-	eventList.Branch("pTCandidatePhotons2", &(vl.pTCandidatePhotons2), "pTCandidatePhotons2");
-	eventList.Branch("hCalSum", &(vl.hCalSum), "hCalSum");
-	eventList.Branch("eCalSum", &(vl.eCalSum), "eCalSum");
-	eventList.Branch("hCalEndCap", &(vl.hCalEndCap), "hCalEndCap");
-	eventList.Branch("eCalEndCap", &(vl.eCalEndCap), "eCalEndCap");
-	eventList.Branch("eCalBarel", &(vl.eCalBarel), "eCalBarel");
-	eventList.Branch("hCalBarel", &(vl.hCalBarel), "hCalBarel");
-	eventList.Branch("eCalOther", &(vl.eCalOther), "eCalOther");
-	eventList.Branch("hCalOther", &(vl.hCalOther), "hCalOther");
-	eventList.Branch("calSum", &(vl.calSum), "calSum");
-	eventList.Branch("hCalSum_NotRepr", &(vl.hCalSum_NotRepr), "hCalSum_NotRepr");
-	eventList.Branch("eCalSum_NotRepr", &(vl.eCalSum_NotRepr), "eCalSum_NotRepr");
-	eventList.Branch("hCalEndCap_NotRepr", &(vl.hCalEndCap_NotRepr), "hCalEndCap_NotRepr");
-	eventList.Branch("eCalEndCap_NotRepr", &(vl.eCalEndCap_NotRepr), "eCalEndCap_NotRepr");
-	eventList.Branch("eCalBarel_NotRepr", &(vl.eCalBarel_NotRepr), "eCalBarel_NotRepr");
-	eventList.Branch("hCalBarel_NotRepr", &(vl.hCalBarel_NotRepr), "hCalBarel_NotRepr");
-	eventList.Branch("eCalOther_NotRepr", &(vl.eCalOther_NotRepr), "eCalOther_NotRepr");
-	eventList.Branch("hCalOther_NotRepr", &(vl.hCalOther_NotRepr), "hCalOther_NotRepr");
-	eventList.Branch("calSum_NotRepr", &(vl.calSum_NotRepr), "calSum_NotRepr");
-
-
-
-
-
-
-
-	IO::LCReader* lcReader = IOIMPL::LCFactory::getInstance()->createLCReader() ;
+	IO::LCReader* lcReader = IOIMPL::LCFactory::getInstance() -> createLCReader() ;
 	TString fName = fn;
 	stringstream fNameStream;
 
-	Double_t theta = 0;
-	Double_t angle_Between_Photons=0;
+	TTree ptTree ("ptTree", "Generator particle tree");
+	TTree pfoTree ("pfoTree", "Generator particle tree");
+	TTree mcTree ("mcTree", "Generator particle tree"); // definicija drveta gde upisujemo histograme
+	TTree elektronskoTree("elektronskoTree", "Generator particle tree"); // ovde su Kragujevcani definisali drvce gde se upisuju histogrami za sve elektrone i pozitrone
+	TTree elektronsko6i7Tree("elektronsko6i7Tree", "Generator particle tree"); // ovde su Kragujevcani definisali drvce gde se upisuju histogrami samo za elektron 6 i pozitron 7
+	TTree elektronskoRekonstrTree("elektronskoRekonstrTree", "Generator particle tree"); // ovde su Kragujevcani definisali drvce gde se upisuju histogrami za rekonstruisane elektrone i pozitrone
+//	TTree pozitronskoRekonstrTree("pozitronskoRekonstrTree", "Generator particle tree"); // ovde su Kragujevcani definisali drvce gde se upisuju histogrami za rekonstruisane pozitrone
+//	elektronskoRekonstrTree.AddFriend("pozitronskoRekonstrTree", "");
+	Float_t m_ll, m_qq, m_H, m_Z1, m_Z2, p_e1, p_e2, E_e1, E_e2, pt_q1, pt_q2, E_q1, E_q2, pt_e1, pt_e2;
+	Float_t E_Z1, E_Z2, theta_Z1, theta_Z2, m_e1e2, theta_e, theta_p;
+	Float_t E_vis, E_vis_E_H,pt_H, E_H, E_miss;
+	Float_t pt_e_sistema, pt_p_sistema;
+	Float_t n_pfo, pt_miss, theta_H;
+	Float_t logy_12, logy_23, logy_34;
+	Float_t Btag1, Btag2;
+	// Float_t Ctag1, Ctag2;
+///////////////////////////////////////////////
+	Float_t fi, theta1, theta2;
+	Float_t n_signal, n_signal_uk, n_evt_mva, nevent_uk;
+	TTree leptonTree ("leptonTree", "Generator particle tree");
+	leptonTree.Branch("m_qq", &m_qq, "m_qq"); // invarijatne mase b-dzeta???
+	leptonTree.Branch("m_H", &m_H, "m_H"); // masa Higzovog bozona
+	leptonTree.Branch("m_Z1", &m_Z1, "m_Z1"); // masa 1. onshell Z-bozonka
+	leptonTree.Branch("m_Z2", &m_Z2, "m_Z2"); // masa 2. onshell Z-bozonka
+	leptonTree.Branch("E_Z1", &E_Z1, "E_Z1");
+	leptonTree.Branch("E_Z2", &E_Z2, "E_Z2");
+	leptonTree.Branch("theta_Z1", &theta_Z1, "theta_Z1");
+	leptonTree.Branch("theta_Z2", &theta_Z2, "theta_Z2");
+	leptonTree.Branch("m_e1e2", &m_e1e2, "m_e1e2");
+	leptonTree.Branch("p_e1", &p_e1, "p_e1"); // impuls elektrona
+	leptonTree.Branch("p_e2", &p_e2, "p_e2"); // impuls pozitrona
+	leptonTree.Branch("theta_e", &theta_e, "theta_e"); // impuls elektrona
+	leptonTree.Branch("theta_p", &theta_p, "theta_p"); // impuls pozitrona
+	leptonTree.Branch("pt_e1", &pt_e1, "pt_e1"); // impuls elektrona
+	leptonTree.Branch("pt_e2", &pt_e2, "pt_e2"); // impuls pozitrona
+	leptonTree.Branch("E_e1", &E_e1, "E_e1"); // energija elektrona
+	leptonTree.Branch("E_e2", &E_e2, "E_e2"); // energija pozitrona
+	leptonTree.Branch("pt_e_sistema", &pt_e_sistema, "pt_e_sistema");
+	leptonTree.Branch("pt_p_sistema", &pt_p_sistema, "pt_p_sistema");
+	leptonTree.Branch("pt_q1", &pt_q1, "pt_q1"); // transverzalni impuls 1. kvarka
+	leptonTree.Branch("pt_q2", &pt_q2, "pt_q2"); // transverzalni impuls 2. kvarka
+	leptonTree.Branch("E_q1", &E_q1, "E_q1"); // energija 1. kvarka
+	leptonTree.Branch("E_q2", &E_q2, "E_q2"); // energija2. kvarka
+	leptonTree.Branch("theta_H", &theta_H, "theta_H"); // Polarni ugao Higzovog bozona
+	leptonTree.Branch("E_vis", &E_vis, "E_vis"); // Vidljiva energija svih cestica dzumle
+	leptonTree.Branch("E_vis_E_H", &E_vis_E_H, "E_vis_E_H"); // Razlika Vidljive energije svih cestica dzumle i Energije Higzovog bozona
+	leptonTree.Branch("E_H", &E_H, "E_H"); // Energija Higzovog bozona
+	leptonTree.Branch("pt_H", &pt_H, "pt_H"); // transverzalni impuls Higzovog bozona
+	leptonTree.Branch("pt_miss", &pt_miss, "pt_miss"); // nedostajucí transverzalni impuls (otisao neutrinu?)
+	leptonTree.Branch("E_miss", &E_miss, "E_miss"); // nedostajucí transverzalni impuls (otisao neutrinu?)
+	leptonTree.Branch("logy_12", &logy_12, "logy_12");
+	leptonTree.Branch("logy_23", &logy_23, "logy_23");
+	leptonTree.Branch("n_pfo", &n_pfo, "n_pfo");
+	leptonTree.Branch("Btag1", &Btag1, "Btag1"); // Verovatnoca da je cestica b-kvark 1
+	leptonTree.Branch("Btag2", &Btag2, "Btag2"); // Verovatnoca da je cestica b-kvark 2
+	leptonTree.Branch("fi", &fi, "fi");
 
 
-	Int_t totalCutEvents = 0;
-	Int_t totalCutEvents_ecal = 0;
-	Int_t totalCutEvents_hcal = 0;
-	Int_t primaryCutEvents=0;
-	Int_t totalEvents = 0;
-	Int_t counterPhotonsPt1 = 0;
-	Int_t counterEventsPt2 = 0;
-	Int_t counterEventsPt3 = 0;
-	Int_t counterEventsPt4 = 0;
 
-	Int_t counterEremaining = 0;
-	Int_t counterPreselectionCuts= 0;
-	Int_t counterCosinusHelicity =0;
-	Int_t counterEhiggs = 0;
-	Int_t counterHiggsInvMass = 0;
-	Int_t counterHiggsPt = 0;
 
-	Int_t counterconeEnergy22=0;
-	Int_t counterconeEnergy24=0;
-	Int_t counterconeEnergy26=0;
-	Int_t counterconeEnergy28=0;
-	Int_t counterconeEnergy30=0;
-	Int_t counterconeEnergy35=0;
-	Int_t counterconeEnergy40=0;
-
-	Int_t counterangle2 = 0;
-	Int_t counterangle4 = 0;
-	Int_t counterangle6 = 0;
-	Int_t counterangle8 = 0;
-	Int_t counterangle10 = 0;
-
-	Int_t CounterStrike = 0;
-	Int_t couterPtPhotons =0;
+//	Float_t brojac_preostalih_KG_elektrona_6 = 0;
+	Float_t pt_KG_elektrona_6 = 0, p_KG_elektrona_6 = 0;
+	Float_t Energija_KG_elektrona_6 = 0;
 
 
 
-	//petlja koja iščitava .slcio podatke ukoliko ima više fajlova za jedan process
-	for(UInt_t iJob=nFirstJob; iJob<=nLastJob; iJob++)
+	// Promenljive za PFO rekonstruisanih elektrona/pozitrona
+//	Float_t brojac_preostalih_KG_elektrona = 0;
+
+
+	// Brojacke promenljive za KRAJNJI elektron/pozitron
+	Int_t N_ukupnih_dogadjaja = 0;
+	Int_t N_KG_elektrona = 0;
+
+	Int_t nsignala_mc = 0;
+
+	Int_t N_za_dva = 0;
+
+
+
+
+	// Petlja koja iscitava .slcio fajlove
+	for(UInt_t iFajl = nPrviFajl; iFajl <= nZadnjiFajl; iFajl++)
 	{
-		cout << "Opening " << Form("%s%i.slcio", fName.Data(), iJob);
-				try
-				{
-					lcReader->open(Form("%s%i.slcio", fName.Data(), iJob));
-				}
-				catch(lcio::IOException &ex)
-				{
-					cout << ". Could not open.\n"; // Exception " << ex.what() << endl;
-					continue;
-				}
-				cout << ". Reading.\n";
+		cout << "Otvara se " << Form("%s%i.slcio", fName.Data(), iFajl);
 
-
-		int brojDogadjaja = lcReader->getNumberOfEvents();	//Ukupan broj događaja
-		cout << "Broj dogadjaja po fajlu je  : " << brojDogadjaja << endl;
-		Int_t numCutEvents = 0; 	//broj dogadjaja posle preselekcije cut-ova
-		Int_t numCutEvents_ecal = 0; 	//broj dogadjaja posle ecal preselekcije cut-ova
-		Int_t numCutEvents_hcal = 0; 	//broj dogadjaja posle hcal preselekcije cut-ova
-	//	Int_t numCutEvents_tcal = 0; 	//broj dogadjaja posle totalCall preselekcije cut-ova
-
-
-
-		Int_t eventsPrimaryCut = 0; 	//broj dogadjaja posle određenih cut-ova
-
-
-		std::vector <TLorentzVector> allPhotons; //vektor koji prikuplja sve fotone
-
-
-		Int_t counterAllCuts = 0;
-		//Int_t hardPhotons = 0;
-
-		// Prolazimo po svakom dogadjaju
-		EVENT::LCEvent* evt = 0;
-		while( (evt = lcReader->readNextEvent()) != 0 )
+		try
 		{
-			Int_t hardPhotonsByEvent = 0;
-			Double_t ecal = 0;
-			Double_t ecalEvt = 0;
-		//	Double_t ecalPht = 0;
+			lcReader -> open(Form("%s%i.slcio", fName.Data(), iFajl));
+		}
 
-			Double_t hcal = 0;
-			Double_t hcalEvt = 0;
-			//Double_t hcalPht = 0;
+		catch(lcio::IOException &ex)
+		{
+			cout << ". Ne moze se otvoriti.\n";
+			continue;
+		}
 
-			Double_t totalCal = 0;
-			Double_t totalCalEvt = 0;
-		//	Double_t calRatio = 0;
-		//	Double_t calRatioEvt = 0;
-			/*Double_t calRatio_ecal_preselection = 0;
-			Double_t calRatioEvt_ecal_preselection = 0;
-			Double_t calRatio_hcal_preselection = 0;
-			Double_t calRatioEvt_hcal_preselection = 0;
-			Double_t calRatio_tcal_preselection = 0;
-			Double_t calRatioEvt_tcal_preselection = 0;*/
+		cout << ". Ucitavanje.\n";
 
+		// KG: ovde su Kragujevcani definisali broj dogadjaja u petlji
+		Int_t N_dogadjaja = 0;
 
+//		Int_t nevent = 0;
 
-			vector<TLorentzVector> photons;
-			vector<TLorentzVector> ptPhotons;
+		EVENT::LCEvent* evt = 0;
 
-			vector<Double_t> photonsECal;
-			vector<Double_t> photonsHCal;
+		// WHILE petlja po dogadjajima
+		while( (evt = lcReader -> readNextEvent()) != 0 && N_dogadjaja <= 31000)//31e+03
+		{
+			// KG: ovde su Kragujevcani definisali unutrasnje brojace
+			int c_n_pfo = 0;
+			N_dogadjaja++;
+			N_ukupnih_dogadjaja++;
+			TLorentzVector temp_e; // definisan privremeni četvorovektor u koji se zapisuju impuls i energija svakog pozitrona
+			TLorentzVector temp_p;
+			EVENT::ReconstructedParticle* reco_link_lepton = 0;
 
-			vector<TLorentzVector> particles;   // other than photons
-			vector <Double_t> PtPhotons;
-			vector <Double_t> ConeEnergyOfPhotons;
+			//cout <<"Dogadjaj "<< N_dogadjaja << endl;
+			Int_t N_leptona_energija_ugao_po_dogadjaju = 0;
+			vector <TLorentzVector> leptoni;
+			vector <EVENT::ReconstructedParticle*> niz_leptons, niz_pfos_GMD;
 
+	/*	    	bool elektronac = false;
+			bool pozitronac = false;
 
+		    	bool elektron2 = false;
+			bool pozitron2 = false;
 
-				std::vector<std::string> colNames = *evt->getCollectionNames();
-			/*std::cout << "\n\nCollection names: \n";
-			for (int i = 0; i < colNames.size(); ++i)
+		    	bool elektron2cutted = false;
+			bool pozitron2cutted = false;
+
+		    	bool mcElektron = false;
+			bool mcPozitron = false;
+
+			double ekp = 0 ;
+			double eke = 0;*/
+
+			vector <TLorentzVector> vec_2isol;
+
+			vector <EVENT::ReconstructedParticle*> niz_linklep, niz_pfos;
+
+			// KG: ovde su Kragujevcani definisali potrebne nizove kvadri-vektora
+			vector <TLorentzVector> niz_KG_elektrona, niz_KG_pozitrona, niz_KG_kvarkova;
+
+//			vector <TLorentzVector> nizl, nizq;
+
+			std::vector<std::string> colNames = *evt -> getCollectionNames();
+
+		//	EVENT::LCCollection* links = evt -> getCollection("RecoMCTruthLink");
+
+			/*for(int i = 0; i < colNames.size(); i++)
 			{
-			std::cout << colNames[i] << endl;
-			}*/
-			IMPL::LCCollectionVec* recParticles = (IMPL::LCCollectionVec*)evt->getCollection("SelectedPandoraPFANewPFOs_Reprocess");/*("PandoraPFANewPFOs");*/
+				if (colNames[i] != "RecoMCTruthLink") break;
 
-	/*		IMPL::LCCollectionVec* eCalBarrelHits = (IMPL::LCCollectionVec*)evt->getCollection("ECALBarrel_Reprocess");
-			IMPL::LCCollectionVec* eCalEndcapHits = (IMPL::LCCollectionVec*)evt->getCollection("ECALEndcap_Reprocess");
-			IMPL::LCCollectionVec* eCalOtherHits = (IMPL::LCCollectionVec*)evt->getCollection("ECALOther_Reprocess");
+			}
+			cout <<"kolekcija "<< colNames[0] << endl;*/
+			//if (colNames != colNames) continue;
+			//if (!links) continue;
 
+			IMPL::LCCollectionVec* mcParticles = (IMPL::LCCollectionVec*) evt -> getCollection("MCParticles");//MCParticlesSkimmed, MCParticles
+			IMPL::LCCollectionVec* rec_Particles = (IMPL::LCCollectionVec*) evt -> getCollection("PFOs");//PFOs, IsolatedElectrons
+			IMPL::LCCollectionVec* recParticles = (IMPL::LCCollectionVec*) evt -> getCollection("IsolatedElectrons");//PFOs,
+			IMPL::LCCollectionVec* jets2 = (IMPL::LCCollectionVec*)evt -> getCollection("Durham2Jets");
 
-			IMPL::LCCollectionVec* hCalBarrelHits = (IMPL::LCCollectionVec*)evt->getCollection("HCALBarrel_Reprocess");
-			IMPL::LCCollectionVec* hCalEndcapHits = (IMPL::LCCollectionVec*)evt->getCollection("HCALEndcap_Reprocess");
-			IMPL::LCCollectionVec* hCalOtherHits = (IMPL::LCCollectionVec*)evt->getCollection("HCALOther_Reprocess");
-
-			IMPL::LCCollectionVec* eCalBarrelHits_NotRepr = (IMPL::LCCollectionVec*)evt->getCollection("ECALBarrel");
-			IMPL::LCCollectionVec* eCalEndcapHits_NotRepr = (IMPL::LCCollectionVec*)evt->getCollection("ECALEndcap");
-			IMPL::LCCollectionVec* eCalOtherHits_NotRepr = (IMPL::LCCollectionVec*)evt->getCollection("ECALOther");
-
-
-			IMPL::LCCollectionVec* hCalBarrelHits_NotRepr = (IMPL::LCCollectionVec*)evt->getCollection("HCALBarrel");
-			IMPL::LCCollectionVec* hCalEndcapHits_NotRepr = (IMPL::LCCollectionVec*)evt->getCollection("HCALEndcap");
-			IMPL::LCCollectionVec* hCalOtherHits_NotRepr = (IMPL::LCCollectionVec*)evt->getCollection("HCALOther");
+			/*UTIL::PIDHandler pidHandler(evt -> getCollection("PFOs"));
+			int trackParamsAlgId = pidHandler.getAlgorithmID("TrackParameters");
+			int d0ParamIndex = pidHandler.getParameterIndex(trackParamsAlgId, "D0");*/
 
 
+			bool signal = false;
+			vector <EVENT::ReconstructedParticle*> reclep_vector; // Definisan niz u koji se zapisuju rekonstrusani elektroni/pozitroni
 
-			Double_t eCalSum = 0;
-			Double_t eCalBarel = 0;
-			Double_t eCalEndCap = 0;
-			Double_t eCalOther = 0;
+			// Definisani broj elektrona, broj pozitrona i broj kvarkova
+//			Int_t N_KG_kvarkova = 0;
 
-			Double_t hCalSum = 0;
-			Double_t hCalBarel = 0;
-			Double_t hCalEndCap = 0;
-			Double_t hCalOther = 0;
+/*			Int_t Broj_leptona = 0;
+			Int_t Broj_kvarkova = 0; */
 
-			// reprocesed
-			eCalBarel += SumCalorimeterHitEnergies(eCalBarrelHits);
-			eCalEndCap += SumCalorimeterHitEnergies(eCalEndcapHits);
-			eCalOther += SumCalorimeterHitEnergies(eCalOtherHits);
-			eCalSum = eCalBarel + eCalEndCap +eCalOther;
+//			Float_t Brojac_za_dvicu = 0;
+			EVENT::MCParticle* e_starac ;
+			EVENT::MCParticle* p_starac ;
+			TLorentzVector e_mc_final, p_mc_final;
+			int c_e_mc_final = 0, c_p_mc_final = 0;
+			int cElec = 0;
+			int cPosi = 0;
 
-			hCalBarel += SumCalorimeterHitEnergies(hCalBarrelHits);
-			hCalEndCap += SumCalorimeterHitEnergies(hCalEndcapHits);
-			hCalOther += SumCalorimeterHitEnergies(hCalOtherHits);
-			hCalSum = hCalBarel + hCalEndCap + hCalOther;
-
-
-
-			Double_t calSum = eCalSum + hCalSum;
-
-			//not Reprocessed
-			Double_t eCalSum_NotRepr = 0;
-			Double_t eCalBarel_NotRepr = 0;
-			Double_t eCalEndCap_NotRepr = 0;
-			Double_t eCalOther_NotRepr = 0;
-
-			Double_t hCalSum_NotRepr = 0;
-			Double_t hCalBarel_NotRepr = 0;
-			Double_t hCalEndCap_NotRepr = 0;
-			Double_t hCalOther_NotRepr = 0;
-
-
-
-			eCalBarel_NotRepr += SumCalorimeterHitEnergies(eCalBarrelHits_NotRepr);
-			eCalEndCap_NotRepr += SumCalorimeterHitEnergies(eCalEndcapHits_NotRepr);
-			eCalOther_NotRepr += SumCalorimeterHitEnergies(eCalOtherHits_NotRepr);
-			eCalSum_NotRepr= eCalBarel_NotRepr + eCalEndCap_NotRepr +eCalOther_NotRepr;
-
-			hCalBarel_NotRepr += SumCalorimeterHitEnergies(hCalBarrelHits_NotRepr);
-			hCalEndCap_NotRepr += SumCalorimeterHitEnergies(hCalEndcapHits_NotRepr);
-			hCalOther_NotRepr += SumCalorimeterHitEnergies(hCalOtherHits_NotRepr);
-			hCalSum_NotRepr = hCalBarel_NotRepr + hCalEndCap_NotRepr + hCalOther_NotRepr;
-
-			Double_t calSum_NotRepr = eCalSum_NotRepr + hCalSum_NotRepr;
-
-			ECE.Fill(eCalSum);
-			HCE.Fill(hCalSum);
-
-			ECE_NotRepr.Fill(eCalSum_NotRepr);
-			HCE_NotRepr.Fill(hCalSum_NotRepr);
-
-
-
-			vl.eCalSum = eCalSum;
-			vl.hCalSum = hCalSum;
-			vl.calSum = calSum;
-			vl.eCalBarel = eCalBarel;
-			vl.eCalEndCap = eCalEndCap;
-			vl.eCalOther = eCalOther;
-			vl.hCalBarel = hCalBarel;
-			vl.hCalEndCap = hCalEndCap;
-			vl.hCalOther = hCalOther;
-
-			vl.eCalSum_NotRepr = eCalSum_NotRepr;
-			vl.hCalSum_NotRepr = hCalSum_NotRepr;
-			vl.calSum_NotRepr = calSum_NotRepr;
-			vl.eCalBarel_NotRepr = eCalBarel_NotRepr;
-			vl.eCalEndCap_NotRepr = eCalEndCap_NotRepr;
-			vl.eCalOther_NotRepr = eCalOther_NotRepr;
-			vl.hCalBarel_NotRepr = hCalBarel_NotRepr;
-			vl.hCalEndCap_NotRepr = hCalEndCap_NotRepr;
-			vl.hCalOther_NotRepr = hCalOther_NotRepr;*/
-
-
-
-
-			//cout << "ukupna enerrgija u kalorimetrima je : "<< hCalSum << ", " << hCalBarel << ", "<< hCalEndCap <<",  "<< hCalOther<<endl;
-
-
-			double_t Evis = 0;	//Ukupna energija po dogadjaju PandoraPFOsDefault_Reprocess, LooseSelectedPandoraPFANewPFOs_Reprocess,
-			//SelectedPandoraPFANewPFOs_Reprocess, TightSelectedPandoraPFANewPFOs_Reprocess
-
-			bool leptonFound = false;	//uslov da nemamo leptone
-			//Petlja preko koje prolazimo kroz sve čestice po svakom dogadjaju
-			for (Int_t i = 0; i < recParticles->getNumberOfElements() ; i++)
+			bool hbb = false;
+			bool e_tracker = false;
+			bool p_tracker = false;
+			for (Int_t i = 0; i < mcParticles -> getNumberOfElements(); i++)
 			{
-				IMPL::ReconstructedParticleImpl* recParticle = (IMPL::ReconstructedParticleImpl*) recParticles->getElementAt(i);
+				IMPL::MCParticleImpl* mcParticle = (IMPL::MCParticleImpl*) mcParticles -> getElementAt(i);
 
 				TLorentzVector temp; //četvorovektor u koji sakupljamo informacije o svakoj čestici
+				const double *p = mcParticle->getMomentum(); // impuls čestice
+				double e = mcParticle->getEnergy();	//energija čestice
+				temp.SetPxPyPzE(p[0], p[1], p[2], e);  	//zapisujemo vrednosti energije i impulsa u četvorovektor
+				Int_t particlePDG = mcParticle->getPDG();
 
-				Int_t particlePDG = fabs(recParticle->getType());
 
+				if (mcParticle->getGeneratorStatus() == 1) {
+					if(particlePDG == 11 && e > 60) {
+						e_mc_final = temp;
+						c_e_mc_final++;
+					}
+					if(particlePDG == -11 && e > 60) {
+						p_mc_final = temp;
+						c_p_mc_final++;
+					}
+
+				}
+
+
+
+				if (mcParticle -> getPDG() == 25 && mcParticle ->getDaughters().size() == 2 && abs (mcParticle ->getDaughters()[0] -> getPDG()) == 5   )
+				{// if za hbb
+					hbb = true;
+					if (mcParticle->getParents()[0]->getPDG()==25){
+					//	cout << "ćale mi je Higgs, a stric mi je:  "<< mcParticle->getParents()[0]->getParents()[0]->getDaughters()[0]->getPDG()<<endl;
+					TLorentzVector e_6, p_7;
+					EVENT::MCParticle* elecTemp =  mcParticle->getParents()[0]->getParents()[0]->getDaughters()[0];
+					EVENT::MCParticle* posiTemp =  mcParticle->getParents()[0]->getParents()[0]->getDaughters()[1];
+					e_starac = mcParticle->getParents()[0]->getParents()[0];
+					p_starac = mcParticle->getParents()[0]->getParents()[1];
+
+
+				//	LCCollection* trackCollection = event->getCollection(trackCollectionName);
+				//	Track* track = dynamic_cast<Track*>(trackCollection->getElementAt(i));
+
+			//		cout << "ele: "<< e_starac->getPDG()<<endl; //proverio da li je cestica elektron
+				//	cout << "posi: "<< p_starac->getPDG()<<endl; // proverio da li je cestica pozitron
+
+
+					const double *ep = elecTemp->getMomentum();
+					double ee = elecTemp->getEnergy();
+					const double *pp = posiTemp->getMomentum();
+					double pe = posiTemp->getEnergy();
+
+					e_6.SetPxPyPzE(ep[0], ep[1], ep[2], ee);
+					p_7.SetPxPyPzE(pp[0], pp[1], pp[2], pe);
+
+					if (e_6.Theta()*180/M_PI > 8 && e_6.Theta()*180/M_PI < 172) e_tracker = true;
+					if (p_7.Theta()*180/M_PI > 8 && p_7.Theta()*180/M_PI < 172) p_tracker = true;
+
+			//		cout<<"redni broj dogadjaja: "<<N_dogadjaja <<endl;
+
+			//		cout << "polarni ugao elektrona je : " <<e_6.Theta()*180/M_PI<<endl;
+			//		cout << "polarni ugao pozitrona je : " <<p_7.Theta()*180/M_PI<<endl;
+				/*	cout << "energija  elektrona je : " <<e_6.E()<<endl;
+					cout << "energija   pozitrona je : " <<p_7.E()<<endl;*/
+				//	cout <<"----------------------------------------"<<endl;
+					} // end of mcParticle->getParents()[0]->getPDG()==25
+				}// if za hbb
+
+			}// end of MCParticles
+
+			if (hbb == false || e_tracker == false || p_tracker == false) continue; // izdvajanje signala
+			nsignala_mc++;
+		//
+		//	cout << "redni broj dogadjaja: "<<N_dogadjaja<<endl;
+
+			E_vis = 0;
+			pt_miss = 0;
+			TLorentzVector sum_vec;
+			for (Int_t i = 0; i < rec_Particles -> getNumberOfElements(); i++)
+			{
+				IMPL::ReconstructedParticleImpl* rec_Particle = (IMPL::ReconstructedParticleImpl*) rec_Particles -> getElementAt(i);
+				IMPL::ReconstructedParticleImpl* iso_lep;
+				c_n_pfo++;
+			//	cout << c_n_pfo<<endl;
+			    E_vis += rec_Particle->getEnergy();
+			    TLorentzVector temp; //četvorovektor u koji sakupljamo informacije o svakoj čestici
+			    const double *p = rec_Particle->getMomentum(); // impuls čestice
+				double e = rec_Particle->getEnergy();	//energija čestice
+				temp.SetPxPyPzE(p[0], p[1], p[2], e);  	//zapisujemo vrednosti energije i impulsa u četvorovektor
+			    sum_vec += temp;
+			//    int no_of_elements = rec_Particles->getNumberOfElements();
+
+			   if (abs(rec_Particle->getType()) ==11)  iso_lep = rec_Particle;
+
+		//		UTIL::PIDHandler pidHandler(evt -> getCollection("PFOs"));
+
+
+			 /*   int algo = pidHandler.getAlgorithmID( "TrackParameters" );// output 1
+			    float d0tag = pidHandler.getParameterIndex(algo, "D0");// output 2
+			    float d0_par = pidHandler.getParticleID(rec_Particle, algo).getParameters()[d0tag];
+				//auto particleId = 	pidHandler.getParticleID(rec_Particle, algo).getParameters()[d0tag];
+			//    cout <<N_dogadjaja<<". , "<<"size: "<<pidHandler.getParticleID(rec_Particle, algo).getParameters().size()<<endl;
+			    cout <<N_dogadjaja<<". , "<<"D0: "<<d0_par<<endl;*/
+			/*	if (particleId){
+
+				}*/
+
+			/*	UTIL::PIDHandler pidHandler(evt -> getCollection("PFOs"));
+				int trackParamsAlgId = pidHandler.getAlgorithmID("TrackParameters");
+				int d0ParamIndex = pidHandler.getParameterIndex(trackParamsAlgId, "D0");*/
+
+
+		//	    cout << "D0 ???" << rec_Particle->getTracks().size() << endl;
+
+	     	   //  float D0 = static_cast<double>(rec_Particles -> parameters().getFloatVal("D0"));
+			   //cout <<"d0: "<< static_cast<float>(jets2 -> parameters().getFloatVal("y_{n-1,n}"))<<endl;
+			//	cout <<" D0: "<<endl;
+
+			    //auto particleIds = rec_Particle->getParticleIDs();
+			    //cout << "particleIds.size(): " << particleIds.size() << endl;
+			    //float flvtag1 = pidHandler.getParticleID(particleIds[0], trackParamsAlgId).getParameters()[d0ParamIndex];
+
+			/*    auto particleIds = pidHandler.getParticleIDs(rec_Particle->getParticleIDUsed(), trackParamsAlgId);
+			    if (particleIds.size() > 0){
+			    	float test = particleIds[0]-getParameters()[d0ParamIndex];
+			    	cout << "test --> " << test << endl;
+			    }
+
+
+			    EVENT::StringVec recPartParams;
+			    rec_Particles->parameters().getStringVals("ParameterNames_TrackParameters", recPartParams);
+			    for(int p = 0;  p < (int)recPartParams.size(); p++) {
+			   // 	cout <<" D0[" << p << "]: " << recPartParams[p] << endl;
+			    }*/
+
+			}
+		    pt_miss += sum_vec.Pt();
+
+
+			Int_t N_KG_elektrona_6 = 0;
+			Int_t N_KG_pozitrona_7 = 0;
+
+			TLorentzVector e_rec, p_rec;
+			for (Int_t i = 0; i < recParticles -> getNumberOfElements(); i++)
+			{
+				IMPL::ReconstructedParticleImpl* recParticle = (IMPL::ReconstructedParticleImpl*) recParticles -> getElementAt(i);
+				TLorentzVector temp; //četvorovektor u koji sakupljamo informacije o svakoj čestici
 				const double *p = recParticle->getMomentum(); // impuls čestice
-
-				int correction = 2 - 4 * rnd.Integer(2);
-			//	correction = (particlePDG == 22) ?  correction : 0;
-				double e = recParticle->getEnergy() ;	//energija čestice
+				double e = recParticle->getEnergy();	//energija čestice
 				temp.SetPxPyPzE(p[0], p[1], p[2], e);  	//zapisujemo vrednosti energije i impulsa u četvorovektor
 
 
-			//	cout<<"particle PDG is: "<<particlePDG<<endl;
 
-				/*if(particlePDG == 11)
+				//cout <<"Nasao elektron \n";
+
+				//if (recParticle -> getType() == 11) {Energija_KG_elektrona_6 = recParticle -> getEnergy(); elektronsko6i7Tree.Fill(); }
+				if (recParticle -> getEnergy() > 60)
 				{
-					cout<<"elektron spoted"<<endl;
-				}*/
-
-				if(particlePDG == 22)	//rad sa fotonima (PDG=22)
-				{
-
-
-					theta = temp.Theta()*180/M_PI; //promenljiva koja nam daje Theta čestice
-					//Double_t phi = temp.Phi();		//promenljiva koja nam daje Phi
-				//	Double_t Pt = temp.Pt();		//promenljiva koja nam daje Pt čestice
-					ptOfPhotons.Fill(temp.Pt());
-					energyOfPhotons.Fill(temp.E());
-					thetaOfPhotons.Fill(theta);
-
-					PtPhotons.push_back(temp.Pt());
-
-					//uzimamo u obzir samo one fotone koji nam prodju uslove
-					if(temp.Pt() >minPt1 )
-					{
-					//	histo2ndHighestPhotonPtZoomed.Fill(PtPhotons[1]);
-
-						counterPhotonsPt1++;
-						ptPhotons.push_back(temp);
-
-						allPhotons.push_back(temp);//sakupili smo sve fotone
-						TLorentzVector currentConeAxis = temp; //foton oko koga pravimo konus
-						Double_t coneEnergy = 0; //Energija konusa oko fotona
-
-
-						for (Int_t k = 0; k < recParticles->getNumberOfElements() ; k++) /*&& coneEnergy <= maxConeEnergy -zaustavlja fot loop kada predje maxE */
-						{
-							IMPL::ReconstructedParticleImpl* recParticle = (IMPL::ReconstructedParticleImpl*) recParticles->getElementAt(k);
-							const double *impuls = recParticle->getMomentum();
-							double energija = recParticle->getEnergy();
-							TLorentzVector otherParticle;
-							otherParticle.SetPxPyPzE(impuls[0], impuls[1], impuls[2],energija);//četvorovektor drugih čestica
-							if (currentConeAxis == otherParticle) continue; //da ne bi ubrojali foton oko kog pravimo konus
-                            Double_t particleAngle = currentConeAxis.Angle(otherParticle.Vect())* 180 / TMath::Pi() ;//ugao izmedju fotona oko kog pravimo konus i čestice
-							anglePhotonParticle.Fill(particleAngle);//histogram uglova izmedju fotona i čestice
-							//anglePhotonParticlewE.Fill(particleAngle, otherParticle.E());//histogram uglova izmedju fotona i čestice otežinjen energijom te čestice
-							if (recParticle->getType()==22)
-							{
-								angle_Between_Photons =particleAngle;
-							}
-
-							//uslov u kom proveravamo da li je foton izolovan ili je deo jet-a
-							if (particleAngle <=coneAngle)
-							{
-								coneEnergy += otherParticle.E();
-							}
-
-
-						}
-						histoconeEnergy.Fill(coneEnergy); //histogram koji iscrtava energiju konusa
-						ConeEnergyOfPhotons.push_back(coneEnergy);
-
-
-
-
-						//uslov u kom proveravamo da li je foton izolovan ili je deo jet-a
-						if (coneEnergy <= maxConeEnergy )
-						{
-								counterAllCuts++;//brojač za fotone koji prodju sve cutove
-								photons.push_back(temp);// sakipljamo fotone posle svih cutova
-								photonsECal.push_back(ecal);
-								photonsHCal.push_back(hcal);
-								histoconeEnergyFilter.Fill(coneEnergy);//histogram koji iscrtava energiju konusa
-
-
-						}
-
+					if (recParticle -> getType() == 11)
+					{N_KG_elektrona_6 ++; Energija_KG_elektrona_6 = recParticle -> getEnergy();
+					e_rec = temp;
+					cElec++;
 					}
 
-
-				} //pdg = 22
-				//dogadjaj ne prolazi ako se u dogadjaju detektuje lepton
-				else if (particlePDG != 22)
-					{
-
-					if(temp.Pt() > leptonPt)
-						leptonFound = true;
-					histoPtOtherParticles.Fill(temp.Pt());
-					}
-				if( temp.Pt() > 0)
-				{
-					Evis += e ;//ukupna enrgija po dogadjaju
+					if (recParticle -> getType() == -11)
+					{N_KG_pozitrona_7 ++;
+					p_rec = temp;
+					cPosi++;
+					/*cout <<"nasao pozitron\n";*/}
 				}
 
+			} // for po PFOs
+			/*cout << "Ukupan broj pocetnih elektrona 6: " << N_KG_elektrona_6 << endl;
+			cout << "Ukupan broj pocetnih pozitrona 7: " << N_KG_pozitrona_7 << endl;
+			cout <<"____________________________________________________________"<<endl;*/
+
+		/*	cout <<N_dogadjaja<< ". po dogadjaju broj MC elektrona: "<<c_e_mc_final<< ", broj reco IsoLep elektona: "<< cElec<<endl;
+			cout << "po dogadjaju broj MC pozitrona: "<<c_e_mc_final<< ", broj reco IsoLep pozitrona: "<< cPosi<<endl;
+
+			bool e_t = false, p_t = false;
+			if (abs (e_mc_final.Theta()*180/M_PI -e_rec.Theta()*180/M_PI ) < 0.1) e_t = true;
+			if (abs (p_mc_final.Theta()*180/M_PI -p_rec.Theta()*180/M_PI ) < 0.1) p_t = true;
+
+			if (e_t) cout << "theta MC elektrona: "<< e_mc_final.Theta()*180/M_PI<< ", isolovanog elektrona: " << e_rec.Theta()*180/M_PI<<endl;
+
+			if (p_t) cout << "theta MC pozitrona: "<< p_mc_final.Theta()*180/M_PI<< ", isolovanog pozitrona: " << p_rec.Theta()*180/M_PI<<endl;
+			cout <<"----------------------------------------"<<endl;*/
+
+
+
+			vector <TLorentzVector> v1l, v2j;
+			double m_y12;
+			double m_y23;
+			 for (Int_t i = 0; i < jets2 -> getNumberOfElements(); i++)
+			 {
+				 IMPL::ReconstructedParticleImpl* recJet = (IMPL::ReconstructedParticleImpl*) jets2 -> getElementAt(i);
+				 TLorentzVector tempjet;
+				// nqu++;
+				 const double *p = recJet -> getMomentum();
+				 Double_t e = recJet -> getEnergy();
+				 tempjet.SetPxPyPzE(p[0], p[1], p[2], e);
+				 Int_t pidjet = recJet -> getType();
+				 v2j.push_back(tempjet);
+
+				 float yMinus = static_cast<double>(jets2 -> parameters().getFloatVal("y_{n-1,n}"));
+				 float yPlus  = static_cast<double>(jets2 -> parameters().getFloatVal("y_{n,n+1}"));
+				 float dMinus = static_cast<double>(jets2 -> parameters().getFloatVal("d_{n-1,n}"));
+				 float dPlus  = static_cast<double>(jets2 -> parameters().getFloatVal("d_{n,n+1}"));
+				// jets2->parameters().
+
+
+				 m_y12 = -log10(yMinus);
+				 m_y23 = -log10(yPlus);
+			//	 cout << "y12 " << m_y12<<endl;
+			//	 cout << "y23 " << m_y23<<endl;
+
+			 }
+
+
+			if(N_KG_elektrona_6 == 1 && N_KG_pozitrona_7 == 1) {
+
+				TLorentzVector e_s, p_s;
+				const double *e_es = e_starac->getMomentum();
+				double e_e = e_starac->getEnergy();
+				const double *p_ps = p_starac->getMomentum();
+				double p_e = p_starac->getEnergy();
+
+				e_s.SetPxPyPzE(e_es[0], e_es[1], e_es[2], e_e);// 4Vektor starca elektrona
+				p_s.SetPxPyPzE(p_ps[0], p_ps[1], p_ps[2], p_e); // 4V starca pozitrona
+				//e_rec , p_rec su rekontruisani elektron i pozitron
+
+	//			cout << "id: "<< e_starac->id() <<endl;
+
+
+
+				TLorentzVector Z1, Z2, higgs;
+				Z1 = e_s  - e_rec;
+				Z2 = p_s - p_rec;
+				//higgs = e_s - e_rec + p_s - p_rec;
+				higgs = v2j[0] + v2j[1];
+				if (higgs.M() < 0 ) continue;
+				if (Z1.E() < 0 || Z2.E()<0) continue;
 
 
+				m_Z1 = abs(Z1.M());
+				m_Z2 = abs(Z2.M());
+				E_Z1 = Z1.E();
+				E_Z2 = Z2.E();
+				m_e1e2 = (e_rec+p_rec).M();
+				theta_Z1 = Z1.Theta()*180/M_PI;
+				theta_Z2 = Z2.Theta()*180/M_PI;
+				theta_e = e_rec.Theta()*180/M_PI;
+				theta_p = p_rec.Theta()*180/M_PI;
+				p_e1 = e_rec.P();
+				p_e2 = p_rec.P();
+				pt_e1 = e_rec.Pt();
+				pt_e2 = p_rec.Pt();
+				E_e1 = e_rec.E();
+				E_e2 = p_rec.E();
+				pt_e_sistema = (e_s + e_rec).Pt();
+				pt_p_sistema = (p_s + p_rec).Pt();
+				pt_q1 = v2j[0].Pt();
+				pt_q2 = v2j[1].Pt();
+				E_q1 = v2j[0].E();
+				E_q2 = v2j[1].E();
+				theta_H = higgs.Theta();
+				E_H = higgs.E();
+				pt_H = higgs.Pt();
+				m_H = (e_s - e_rec + p_s - p_rec).M();
+				m_qq  = (v2j[0] + v2j[1]).M();
+				n_pfo = c_n_pfo;
+				E_vis_E_H = E_vis - E_H;
+				E_miss = 1000 - E_vis;
+				logy_12 = m_y12;
+				logy_23 = m_y23;
 
-			}  // end of particle loop
+		//		if (e_rec.E() > e_s.E()) cout <<"finalni elektron ima višu energiju!!!\n";
+		//		if (p_rec.E() > p_s.E()) cout <<"finalni pozitron ima višu energiju!!!\n";
 
-			histoECall_test.Fill(ecal);
+				TLorentzVector lokalac_Niz_el_in4, lokalac_Niz_poz_in4, lokalac_Niz_el_out4, lokalac_Niz_poz_out4, lokalacZ1, lokalacZ2;
 
+						TVector3 BoostToHiggs = -(higgs.BoostVector());     // prelazi se u koordinatni sistem Higsovog bozona
 
-			histoECall_pt_preselection.Fill(ecal);
-			histoHCall_pt_preselection.Fill(hcal);
-			histoECallEvt_pt_preselection.Fill(ecalEvt);
-			histoHCallEvt_pt_preselection.Fill(hcalEvt);
-			histoTotalCallEvt_pt_preselection.Fill(totalCalEvt);
-			histoTotalCall_pt_preselection.Fill(totalCal);
+						lokalac_Niz_el_in4 = e_s;
+						lokalac_Niz_el_out4 = e_rec;
+						lokalac_Niz_poz_in4 = p_s;
+						lokalac_Niz_poz_out4 = p_rec;
+						lokalacZ1 = Z1; // 4-vektor Z1-bozona ++++//////--------
+						lokalacZ2 = Z2; // 4-vektor Z2-bozona
 
+						//*****BOOST TO HIGGS****
+						lokalac_Niz_el_in4.Boost(BoostToHiggs);
+						lokalac_Niz_poz_in4.Boost(BoostToHiggs);
+						lokalac_Niz_el_out4.Boost(BoostToHiggs);
+						lokalac_Niz_poz_out4.Boost(BoostToHiggs);
+						lokalacZ1.Boost(BoostToHiggs);
+						lokalacZ2.Boost(BoostToHiggs);
 
-			bool candFound = false;//
 
-			for (int i = 0; i < (int)allPhotons.size() - 1; ++i)
-			{
-				for (int j = i + 1; j < (int)allPhotons.size(); ++j)
-				{
+						TVector3 Niz_el_in3;
+						TVector3 Niz_poz_in3;
 
-					TLorentzVector pair = allPhotons[i]+allPhotons[j];//sabira četvorovektore
+						TVector3 Niz_el_out3;
+						TVector3 Niz_poz_out3;
 
-					if (100 > pair.M() && pair.M() < 150)//uslov da bi par bio higs kandidat
-					{
+						TVector3 OnShell3_Z;
+						TVector3 OffShell3_Z;
 
-					 candFound = true;
-				//	 cout <<evt<<".   invM je :  "<<pair.M()<<endl;
 
-					}
-				}
-			}
+						Niz_el_in3.SetXYZ(lokalac_Niz_el_in4.X(), lokalac_Niz_el_in4.Y(), lokalac_Niz_el_in4.Z());
+						Niz_el_out3.SetXYZ(lokalac_Niz_el_out4.X(), lokalac_Niz_el_out4.Y(), lokalac_Niz_el_out4.Z());
+						Niz_poz_in3.SetXYZ(lokalac_Niz_poz_in4.X(), lokalac_Niz_poz_in4.Y(), lokalac_Niz_poz_in4.Z());
+						Niz_poz_out3.SetXYZ(lokalac_Niz_poz_out4.X(), lokalac_Niz_poz_out4.Y(), lokalac_Niz_poz_out4.Z());
 
-	//		if  (candFound == false) continue;
+						OnShell3_Z.SetXYZ(lokalacZ1.X(),lokalacZ1.Y(),lokalacZ1.Z()); // impuls Z1
+						OffShell3_Z.SetXYZ(lokalacZ2.X(),lokalacZ2.Y(),lokalacZ2.Z()); // impuls Z2
 
 
+						//------ NASA DEFINICIJA UGLA PHI - u ovom slucaju su normale na ravni usmerene isto ------//
 
+						TVector3 brojilac1 = Niz_el_in3.Cross(Niz_el_out3);   // brojilac vektora n1
+						Double_t imenilac1 = brojilac1.Mag();   // sqrt(pow(brojilac1.X(),2) + pow(brojilac1.Y(),2) + pow(brojilac1.Z(),2));   // imenilac vektora n1
+		//				cout <<"brojilac1.px " <<brojilac1.Px()<< endl;
+		//				cout <<"imenilac1 " <<imenilac1<< endl;
+						TVector3 n1 = brojilac1 * pow(imenilac1,-1);           // vektor n1
 
+						TVector3 brojilac2 = Niz_poz_in3.Cross(Niz_poz_out3); // brojilac vektora n2
+						Double_t imenilac2 = brojilac2.Mag(); // sqrt(pow(brojilac2.X(),2) + pow(brojilac2.Y(),2) + pow(brojilac2.Z(),2));   // imenilac vektora n2
 
+						TVector3 n2 = brojilac2 * pow(imenilac2,-1);           // vektor n2
 
-			sort(PtPhotons.begin(), PtPhotons.end(), greater<int>());
+		//				fi1 = acos(n1.Dot(n2));      // * 180 / M_PI prvi ugao ---> znak plus u argumentu funkcije kada su vektori n1 i n2 u istom smeru i obrnuto
+						fi = OnShell3_Z.Dot(n1.Cross(n2)) * fabs (pow(OnShell3_Z.Dot(n1.Cross(n2)),-1)) * (acos(n1.Dot(n2)));
 
-			histoHighestPhotonPt.Fill(PtPhotons[0]);
-			histo2ndHighestPhotonPt.Fill(PtPhotons[1]);
-			vl.HighestPhotonPt = PtPhotons[0];
-			vl.secondHighestPhotonPt = PtPhotons[1];
+				leptonTree.Fill();
 
+			//	cout <<"inv M  z1 rec  je : " <<Z1.M()<<endl;
+			//	cout <<"inv M  z2  je : " << Z2.M()<<endl;
 
-			if(ptPhotons.size()==2)
-			{
-				couterPtPhotons++;
-			}
+		//		cout <<"Energija e rec  je : " <<e_rec.E()<<endl;
+		//		cout <<"Energija p rec je : " <<p_rec.E()<<endl;
 
-			if (ConeEnergyOfPhotons.size()==2)
-			{
-			histoconeEnergyfor2Photons.Fill(ConeEnergyOfPhotons[0]);
-			histoconeEnergyfor2Photons.Fill(ConeEnergyOfPhotons[1]);
-			}
+			//	cout <<"inv M Higsovog pozona je  : " <<  (Z1+Z2).M()  <<endl;
 
-			Int_t photonsSize = photons.size();
-			histoNumberPhotonsbyEvent.Fill(photons.size());
-			vl.NumberPhotonsbyEvent = photonsSize;
 
+				N_za_dva++;
+			}//cout <<"Nasao sam event \n";
 
-			Int_t Emiss = EnergyCenterMass - Evis; // missing energy
-			histoMissingEnergy.Fill(Emiss);
+			//if ( N_KG_elektrona_6 >= 2) cout <<"Broj el. "<< N_KG_elektrona_6 << endl;
+			//if ( N_KG_pozitrona_7 >= 2) cout <<"Broj poz. "<< N_KG_pozitrona_7 << endl;
+			//cout <<"\\\\\\\\\\\\\\\\\\\\\\\\\\\\n"<<endl;
 
-			vl.MissingEnergy = Emiss;
 
-			//cout << "lepton found: " <<leptonFound <<endl;
-		//	if(leptonFound) continue; //ako je u finalnom stanju imamo lepton ili kvark (sem neutrina), događaj se preskače
+		} // Kraj WHILE petlje po dogadjajima
 
+/*		cout << "Zatvara se petlja po dogadjajima\n";
+		cout << "Broj dogadjaja po fajlu iznosi " << nevent << endl; */
 
-			// At this point, all relevant photons have been collected.
+		lcReader -> close();
 
+	} // Kraj petlje po fajlovima
 
-		//	cout << "photon size is: " << photons.size()<<endl;
-			//proveravamo da li u eventu ima detektovano više od jednog fotona koji bi bili kandidat za higsov bozon
-			if (photons.size() == photonSize )
-			{
-				vector<CandidateData> candidates;
-				CounterStrike++;
-				//histoNumberPhotonsbyEvent.Fill(photons.size());//histogram koji nam pokazuje broj fotona po događaju
+	cout << "Ukupan broj dogadjaja: " << N_ukupnih_dogadjaja << endl;
+	cout << "Ukupan broj dogadjaja signala: " << nsignala_mc << endl;
+	cout << "Ukupan broj elektrona signala, nelinkovanih: " << N_KG_elektrona << endl;
+//	cout << "Ukupan broj pocetnih elektrona 6: " << N_KG_elektrona_6 << endl;
+//	cout << "Ukupan broj pocetnih pozitrona 7: " << N_KG_pozitrona_7 << endl;
+	//cout<<"broj reko elektrona je : "<< cElec<<endl;
+	//cout<<"broj reko pozitrona je : "<< cPosi<<endl;
 
+	cout << "Broj dogadjaja sa dva rekonstruisana leptona sa E > 60 GeV " << N_za_dva << endl;
+//	cout << "broj dogadjaja za krivu: " << brDogadjajazaKrivu << endl;
+/*cout << "broj dogadjaja sa dva leptona new: " << broj_dogadjaja_2lep << endl;
+cout << "broj dogadjaja sa dva leptona new posle Etrack cut: " << n_etrack << endl;
+cout << "broj dogadjaja sa dva leptona new posle ratio cut: " << n_ratio << endl;
+cout << "broj dogadjaja sa dva leptona new posle IP cut: " << n_IP_brojac << endl;
+cout << "broj dogadjaja sa dva leptona new posle kriva cut: " << n_brojac_kriva << endl;
+cout << "broj dogadjaja sa dva leptona finalno: " << nlep_final_new << endl;*/
 
 
 
-				for (int i = 0; i < (int)photons.size() - 1; ++i)
-				{
-					for (int j = i + 1; j < (int)photons.size(); ++j)
-					{
-						CandidateData current(photons[i], photons[j]);//uzima dva fotona
 
-						TLorentzVector pair = current.Higgs();//sabira četvorovektore
 
-						if (minInvMass < pair.M() && pair.M() < maxInvMass)//uslov da bi par bio higs kandidat
-						{
-							candidates.push_back(current);
 
-						}
-					}
-				}
 
-				// Pt tests
-				bool pt2Found = false;
-				bool pt3Found = false;
-				bool pt4Found = false;
-				for (int i = 0; i < (int)candidates.size(); ++i)
-				{
-					CandidateData candidate = candidates[i];
+/*	cout << "Ukupan broj kvarkova nastalih od Higsa iznosi " << N_KG_kvarkova << endl;
+	cout << "Ukupan broj dogadjaja: " << nevent_uk << endl;
+	cout << "Ukupan broj leptona signala na generisanom nivou: " << nsignala_mc*2 << endl;
+	cout << "Ukupan broj truth-linkovanih leptona od rekonstruisanih leptona: " << n_recomc_link_lep << endl;
+	// cout << "Ukupan broj dogadjaja sa 2 truth-leptona/evt posle cuts: " << n_truthlep_kriva << endl;
+	cout << "Ukupan broj pfo cestica bez truth-linkovanih leptona: " << n_ukpfo << endl;
+	cout << "Broj dogadjaja nakon odsecanja za Pt: " << n_lep_evt_pt_cutted << endl;
+	cout << "Broj dogadjaja nakon odsecanja za Energija_leptonskog_traga: " << n_lep_evt_cutted << endl;
+	cout << "Broj dogadjaja nakon odsecanja za d0: " << n_lep_evt_d0_cutted << endl;
+	cout << "Broj dogadjaja nakon odsecanja za z0: " << n_lep_evt_z0_cutted << endl;
+	cout << "Broj dogadjaja nakon odsecanja za r03d: " << n_lep_evt_r03d_cutted << endl;
+	cout << "Broj dogadjaja nakon odsecanja za ratio: " << n_lep_evt_ratio_cutted << endl;
+	cout << "Broj prezivelih leptona: " << brojac_prezivelih_leptona << endl;
 
-					TLorentzVector photon1 = candidate.Photon1;
-					TLorentzVector photon2 = candidate.Photon2;
-
-					if (!pt2Found && (photon1.Pt() > minPt2 && photon2.Pt() > minPt2))
-					{
-						counterEventsPt2++;
-						pt2Found = true;
-					}
-
-					if (!pt3Found && (photon1.Pt() > minPt3 && photon2.Pt() > minPt3))
-					{
-						counterEventsPt3++;
-						pt3Found = true;
-					}
-
-					if (!pt4Found && (photon1.Pt() > minPt4 && photon2.Pt() > minPt4))
-					{
-						counterEventsPt4++;
-						pt4Found = true;
-					}
-				}
-
-				//proverava koji kandidat ima najbližu vrednost higsovom bozonu
-				vector<CandidateData>::iterator candidate = min_element(candidates.begin(), candidates.end(), IsBetterHiggsCandidate);
-				if (candidate != candidates.end())
-
-				{
-				//	numCutEvents++;//brojimo dogadjaje koji prodju uslove za energiju, invarijantnu masu, uglove,Pt
-					eventsPrimaryCut++;
-					TLorentzVector higgs = candidate->Higgs();
-					Double_t Ehiggs = higgs.Energy();//energija kandidata
-
-
-					Double_t Eremaining = Evis - Ehiggs;//vidljiva energija posle higgsa
-					//		cout << "E remaining:"<< Eremaining<<endl;
-
-					Double_t higgsInvM=higgs.M();
-					Double_t higgsPt =higgs.Pt();
-
-					vl.EcallEnergy = ecal;
-
-//					cout<<"inv masa je: "<<	higgsInvM<<endl;
-
-
-
-					histoCandidateM.Fill(higgs.M());
-					TLorentzVector photon = candidate->Photon1;
-					TLorentzVector photon2 = candidate->Photon2;
-
-					TLorentzVector higherPtphoton ;
-					TLorentzVector lowerPtphoton ;
-
-					if (photon.Pt() > photon2.Pt())
-					{
-						higherPtphoton = photon;
-						lowerPtphoton = photon2;
-					}else {
-						higherPtphoton = photon2;
-						lowerPtphoton = photon;
-					}
-
-
-				    Double_t theta1 = photon.Theta()*180/M_PI;
-				    Double_t theta2 = photon2.Theta()*180/M_PI;
-				    Double_t pt1 = higherPtphoton.Pt();
-				    Double_t pt2 = lowerPtphoton.Pt();
-
-
-
-				    if (minhiggsInvM<higgsInvM && higgsInvM<maxhiggsInvM)
-				    {
-					    histoECall_photonsInvM_preselection.Fill(ecal);
-					    histoHCall_photonsInvM_preselection.Fill(hcal);
-					    histoTotalCall_photonsInvM_preselection.Fill(totalCal);
-					    histoECallEvt_photonsInvM_preselection.Fill(ecalEvt);
-					    histoHCallEvt_photonsInvM_preselection.Fill(hcalEvt);
-					    histoTotalCallEvt_photonsInvM_preselection.Fill(totalCalEvt);
-				    }
-
-				    if (cutEhiggsMin < Ehiggs && Ehiggs < cutEhiggsMax)
-				    {
-					    histoECall_photonsEnergy_preselection.Fill(ecal);
-					    histoHCall_photonsEnergy_preselection.Fill(hcal);
-					    histoTotalCall_photonsEnergy_preselection.Fill(totalCal);
-					    histoECallEvt_photonsEnergy_preselection.Fill(ecalEvt);
-					    histoHCallEvt_photonsEnergy_preselection.Fill(hcalEvt);
-					    histoTotalCallEvt_photonsEnergy_preselection.Fill(totalCalEvt);
-				    }
-
-
-
-
-
-
-				    vl.CandidateInvariantM=higgsInvM;
-				    vl.CandidateEnergy = higgs.E();
-				    vl.CandidatePhi = higgs.Phi();
-				    vl.CandidatePt = higgs.Pt();
-				    vl.CandidateTheta = higgs.Theta();
-				    vl.pLCandidate = higgs.Z();
-				    vl.thetaCandidatePhotons1 = higherPtphoton.Theta();
-				    vl.thetaCandidatePhotons2 = lowerPtphoton.Theta();
-				    vl.pLCandidatePhotons1 = higherPtphoton.Z();
-				    vl.pLCandidatePhotons2 = lowerPtphoton.Z();
-				    vl.pTCandidatePhotons1 = higherPtphoton.Pt();
-				    vl.pTCandidatePhotons2 = lowerPtphoton.Pt();
-
-
-
-				    PtofCandidatePhotons.Fill(photon.Pt());
-				    PtofCandidatePhotons.Fill(photon2.Pt());
-
-				    energyofCandidatePhotons.Fill(photon.E());
-				    energyofCandidatePhotons.Fill(photon2.E());
-
-
-				    PtofCandidatePhotonsZoomed.Fill(photon.Pt());
-				    PtofCandidatePhotonsZoomed.Fill(photon2.Pt());
-
-				    energyofCandidatePhotonsZoomed.Fill(photon.E());
-				    energyofCandidatePhotonsZoomed.Fill(photon2.E());
-
-
-				    thetaOfCandidatePhotons.Fill(theta1);
-				    thetaOfCandidatePhotons.Fill(theta2);
-
-
-
-					histoPhoton1CandidateTheta.Fill(theta1);
-					histoPhoton2CandidateTheta.Fill(theta2);
-
-				/*	Double_t Px11 = candidate->Photon1.X();
-					Double_t Py11 = candidate->Photon1.Y();
-					Double_t Px22 = candidate->Photon2.X();
-					Double_t Py22 = candidate->Photon2.Y();*/
-				//	Double_t higherPtPhoton = TMath::Max(TMath::Sqrt(Px11*Px11 +Py11*Py11), TMath::Sqrt(Px22*Px22 +Py22*Py22));//Energija energičnijeg fotona koji je kandidat
-					//Double_t lowerPtPhoton = TMath::Min(TMath::Sqrt(Px11*Px11 +Py11*Py11), TMath::Sqrt(Px22*Px22 +Py22*Py22));//Energija manje energičnog fotona koji je kandidat
-
-					histoPtof1stPhotonofCandidate.Fill(pt1);//(higherPtPhoton);
-					histoPtof2ndPhotonofCandidate.Fill(pt2);//(lowerPtPhoton);
-
-					TVector3 boosttoparent = -(higgs.BoostVector());//prelazimo u sitem CM
-
-
-					photon.Boost(boosttoparent);//prebacujemo fotone u sistem CM
-					photon2.Boost(boosttoparent);
-					TVector3 photon_3v=photon.Vect();
-					TVector3 photon2_3v = photon2.Vect();
-					TVector3 higgs_3v = higgs.Vect();
-
-					Double_t anglePhoton1 = photon.Angle(higgs_3v);
-					Double_t anglePhoton2 = photon2.Angle(higgs_3v);
-
-					Double_t lowerAngle = TMath::Min(anglePhoton1, anglePhoton2) ;
-					//Double_t higherAngle = TMath::Max(anglePhoton1, anglePhoton2) ;
-					Double_t cosinusHelicity = TMath::Cos(lowerAngle);
-
-
-					Double_t higherEnergyPhotonE = TMath::Max(candidate->Photon1.E(), candidate->Photon2.E());//Energija energičnijeg fotona koji je kandidat
-					Double_t lowerEnergyPhotonE = TMath::Min(candidate->Photon1.E(), candidate->Photon2.E());//Energija manje energičnog fotona koji je kandidat
-
-					Double_t Px1 = photon.X();
-					Double_t Py1 = photon.Y();
-					Double_t Pz1 = photon.Z();
-					Double_t Px2 = photon2.X();
-					Double_t Py2 = photon2.Y();
-					Double_t Pz2 = photon2.Z();
-
-					Double_t zbirPt = TMath::Sqrt(Px1*Px1 +Py1*Py1) + TMath::Sqrt(Px2*Px2 +Py2*Py2); // zbir transverzalnih impulsa
-					Double_t Theta1 =candidate->Photon1.Theta()*180/M_PI;
-					Double_t Theta2 = candidate->Photon2.Theta()*180/M_PI;
-					Double_t Phi1 = candidate->Photon1.Phi();
-					Double_t Phi2 = candidate->Photon2.Phi();
-					Double_t CMTheta2 =photon2.Theta()*180/M_PI;
-					Double_t CMTheta1 =photon.Theta()*180/M_PI;
-					Double_t zbirImpulsa = TMath::Sqrt(Px1*Px1 +Py1*Py1 + Pz1*Pz1) - TMath::Sqrt(Px2*Px2 +Py2*Py2 + Pz2*Pz2);
-
-				//	cout << "zbir impulsa je: "<<zbirImpulsa<<endl;// proveravamo da li su fotoni back to back
-
-
-					Double_t angleBetweenPotons = candidate->Photon1.Angle(candidate->Photon2.Vect())*180/M_PI;
-					//cout<< "ugao izmedju fotona je: "<< angleBetweenPotons<<endl;
-
-					if (  minhiggsInvM<higgsInvM && higgsInvM<maxhiggsInvM && cutEhiggsMin < Ehiggs && Ehiggs < cutEhiggsMax && higgs.Pt()> cutHiggsPt)
-					{
-						numCutEvents++;
-						histoCandidateM_preselectionCut.Fill(higgs.M());
-						histoCandidatePt_preselectionCut.Fill(higgs.Pt());
-						histoCandidateEnergy_preselectionCut.Fill(higgs.Energy());
-						histoCanditateTheta_preselectionCut.Fill(higgs.Theta()*180/M_PI);
-						histoCandidatePhi_preselectionCut.Fill(higgs.Phi());
-						histoRemainingEnergy_preselectionCut.Fill(Eremaining) ;
-						histoBoost_preselectionCut.Fill(higgs.BoostVector().Mag());
-						histoPhoton1CandidateTheta_preselectionCut.Fill(theta1);
-						histoPhoton2CandidateTheta_preselectionCut.Fill(theta2);
-						histoPtof1stPhotonofCandidate_preselectionCut.Fill(photon.Pt());
-						histoPtof2ndPhotonofCandidate_preselectionCut.Fill(photon2.Pt());
-						histoHigherEnergyPhoton_preselectionCut.Fill(higherEnergyPhotonE);
-						histoLowerEnergyPhoton_preselectionCut.Fill(lowerEnergyPhotonE);
-						histoVisibleEnergy_preselectionCut.Fill(Evis);
-						histoCosinusHelicityAngle_preselectionCut.Fill(cosinusHelicity);
-
-					}//end if preselekcione varijable
-
-
-
-
-					vl.cosHelAngle = cosinusHelicity;
-					//eventList.Fill();
-					//energyOfPhotons.Fill(higherEnergyPhotonE, lowerEnergyPhotonE);
-					histoTheta.Fill(Theta1);
-					histoTheta.Fill(Theta2);
-					histoPhi.Fill(Phi1);
-					histoPhi.Fill(Phi2);
-					//histoCandidateM.Fill(higgs.M());
-					histoCandidateMFineBinning.Fill(higgs.M());
-					histoCandidatePt.Fill(higgs.Pt());
-					histoTestPt.Fill(higgs.Pt());
-					histoCandidateEnergy.Fill(higgs.Energy());
-					histoCanditateTheta.Fill(higgs.Theta()*180/M_PI);
-					histoCandidatePhi.Fill(higgs.Phi());
-					histoRemainingEnergy.Fill(Eremaining) ;
-					histoBoost.Fill(higgs.BoostVector().Mag());
-					histoHigherEnergyPhoton.Fill(higherEnergyPhotonE);
-					histoLowerEnergyPhoton.Fill(lowerEnergyPhotonE);
-					histoZbirPt.Fill(zbirPt);
-					histogram.Fill(CMTheta1, CMTheta2);
-					histoHardPhotonsByEvent.Fill(hardPhotonsByEvent);
-					histoVisibleEnergy.Fill(Evis);
-					histoCosinusHelicityAngle.Fill(cosinusHelicity);
-					histoHelicityAngle.Fill(anglePhoton1);
-					histoHelicityAngle.Fill(anglePhoton2);
-					histoZbirImpulsa.Fill(zbirImpulsa);
-					angleBetweenPhotons.Fill(angle_Between_Photons);
-
-
-
-
-					if (Eremaining < cutEremaining)
-						{
-							counterEremaining++;
-							histoInvMErem.Fill(higgs.M());
-						}
-
-
-
-					if(cutEhiggsMin <= Ehiggs && Ehiggs <= cutEhiggsMax )
-						{
-						counterEhiggs++;
-						histoInvMEHigs.Fill(higgs.M());
-						}
-					if(100<=higgsInvM && higgsInvM<=150)
-						{
-						counterHiggsInvMass++;
-						histoInvMInvM.Fill(higgs.M());
-						}
-
-					if(higgsPt> cutHiggsPt)
-						{
-						counterHiggsPt++;
-						histoInvMPt.Fill(higgs.M());
-						}
-
-					if (Eremaining < cutEremaining && minhiggsInvM<higgsInvM && higgsInvM<maxhiggsInvM && cutEhiggsMin < Ehiggs && Ehiggs < cutEhiggsMax && higgs.Pt()> cutHiggsPt)
-						{
-						counterPreselectionCuts++;
-						histoInvMPreselection.Fill(higgs.M());
-						}
-				}
-				eventList.Fill();
-
-			}
-
-
-		} // End of event loop
-
-
-		totalCutEvents+=numCutEvents;//ukupan broj dogadjaja koji prodje cutove iz svih fajlova
-		totalCutEvents_ecal+=numCutEvents_ecal;//ukupan broj dogadjaja koji prodje ecal preselekciju iz svih fajlova
-		totalCutEvents_hcal+=numCutEvents_hcal;//ukupan broj dogadjaja koji prodje  hcal preseleckciju iz svih fajlova
-
-
-		totalEvents+=brojDogadjaja; //ukupan broj dogadjaja iz svih fajlova
-		primaryCutEvents+=eventsPrimaryCut;
-		cout << "Broj event-a posle cut-a je: " << numCutEvents << endl;
-		//cout << "Broj event-a posle ecall cut-a je: " << numCutEvents << endl;
-		//cout << "Broj event-a posle hcall cut-a je: " << numCutEvents << endl;
-
-		cout << "Broj fotona posle primarnog cut-a  je: " << counterPhotonsPt1 << endl;
-		cout << "Broj fotona posle svih cut-ova  je: " << counterAllCuts << endl;
-
-
-
-
-
-
-		/*for (Int_t i = 0; i < allPhotons.size()-1 ; i++)
-			{
-
-		for (Int_t j=i+1; j <  allPhotons.size(); j++)
-			{
-				Double_t tempAngle = allPhotons[i].Angle(allPhotons[j].Vect());
-				histoangleBetweenPhotons.Fill(tempAngle);
-
-			}
-
-			}*/
-
-
-		lcReader->close();
-
-	} // End of file loop
-
-	Double_t percentageEremaining = (Double_t) counterEremaining/primaryCutEvents * 100;
-	Double_t percentageCosinusHelicity = (Double_t) counterCosinusHelicity/primaryCutEvents * 100;
-	Double_t percentageEhiggs = (Double_t) counterEhiggs/primaryCutEvents * 100;
-	Double_t percentageHiggsPt = (Double_t) counterHiggsPt/primaryCutEvents * 100;
-	Double_t percentagePreselectionCuts = (Double_t) counterPreselectionCuts/primaryCutEvents * 100;
-	Double_t percentageHiggsInvMass = (Double_t) counterHiggsInvMass/primaryCutEvents * 100;
-
-	Double_t percentageConeEnergy22= (Double_t) counterconeEnergy22/totalEvents * 100;
-	Double_t percentageConeEnergy24= (Double_t) counterconeEnergy24/totalEvents * 100;
-	Double_t percentageConeEnergy26= (Double_t) counterconeEnergy26/totalEvents * 100;
-	Double_t percentageConeEnergy28= (Double_t) counterconeEnergy28/totalEvents * 100;
-	Double_t percentageConeEnergy30= (Double_t) counterconeEnergy30/totalEvents * 100;
-	Double_t percentageConeEnergy35= (Double_t) counterconeEnergy35/totalEvents * 100;
-	Double_t percentageConeEnergy40= (Double_t) counterconeEnergy40/totalEvents * 100;
-
-	Double_t percentageAngle2= (Double_t) counterangle2/totalEvents * 100;
-	Double_t percentageAngle4= (Double_t) counterangle4/totalEvents * 100;
-	Double_t percentageAngle6= (Double_t) counterangle6/totalEvents * 100;
-	Double_t percentageAngle8= (Double_t) counterangle8/totalEvents * 100;
-	Double_t percentageAngle10= (Double_t) counterangle10/totalEvents * 100;
-
-
-
-
-
-
-
-
-
-
-	Double_t percentagePt1 = (Double_t) totalCutEvents/totalEvents * 100;
-	cout << "Efikasnost je: " << percentagePt1 << " %"<< endl;
-
-	Double_t percentagePt2 = (Double_t) counterEventsPt2/totalEvents * 100;
-	cout << "Efikasnost je: " << percentagePt2 << " %"<< endl;
-
-	Double_t percentagePt3 = (Double_t) counterEventsPt3/totalEvents * 100;
-	cout << "Efikasnost je: " << percentagePt3 << " %"<< endl;
-
-	Double_t percentagePt4 = (Double_t) counterEventsPt4/totalEvents * 100;
-	cout << "Efikasnost je: " << percentagePt4 << " %"<< endl;
-
-	cout <<"Ukupan broj dogadjaja koji prodju katove je: " << totalCutEvents << endl;
-	cout <<"Ukupan broj dogadjaja je: " << totalEvents << endl;
-
-	Double_t percentage_Ecall_preselection = (Double_t) totalCutEvents_ecal/totalEvents * 100;
-	Double_t percentage_Hcall_preselection = (Double_t) totalCutEvents_ecal/totalEvents * 100;
-
-//	cout << "Efikasnost posle ecall preseleckcije: " << percentage_Ecall_preselection << " %"<< endl;
-	//cout << "Efikasnost posle hcall preseleckcije: " << percentage_Hcall_preselection << " %"<< endl;
-
-	//cout << "Broj događaja posle ecal < 1000: " << CounterStrike << endl;
-	cout << "Broj događaja posle primarnog kata je:"  << primaryCutEvents<<endl;
-	cout <<"Ukupan broj dogadjaja sa 2 fotona sa pT>15 GeV je : " << couterPtPhotons << endl;
-
-
-
-
-
-
-	//cout<<"broj dogadjaja sa coneE< 8 je: "<<counterconeEnergy22<<endl;
-
-
-	ofstream file ;
-	file.open("proba.txt", ios_base::out | ios_base::app);
-
-	file << minPt1 << "\t" << percentagePt1 << endl;
-	file << minPt2 << "\t" << percentagePt2 << endl;
-	file << minPt3 << "\t" << percentagePt3 << endl;
-	file << minPt4 << "\t" << percentagePt4 << endl;
-	file << "___________________________________ "<< endl;
-
-	file.close();
-
-	ofstream results ;
-	results.open("rezultatiEcallEvent.txt", ios_base::out | ios_base::app);
-	results << "pT > " << minPt1 <<", "<< minInvMass<<" < M < " << maxInvMass << ", leptonPt > "<< leptonPt << ", cone Angle < "<< 2*coneAngle << ", efikasnost = "<<percentagePt1 <<endl;
-	results.close();
-
-	ofstream events;
-	events.open( "eventsEcallEvent.txt " ,ios_base::out | ios_base::app);
-	events << "ukupan broj događaja:  "<< totalEvents<< ",  broj događaja posle cut-va:  "<< totalCutEvents<<endl;
-	events.close();
-
-	TGraph efikasnostproba ("probaEcallEvent.txt", "%lg %lg", "\t");
-	efikasnostproba.GetXaxis()->SetTitle("Pt_{#gamma} (GeV)");
-	efikasnostproba.GetYaxis()->SetTitle("Efficiency");
-	efikasnostproba.SetTitle("Signal");
-
-	ofstream preselectionEfficiency;
-	preselectionEfficiency.open( "preselectionEcallEvent.txt " ,ios_base::out | ios_base::app);
-	preselectionEfficiency << "ukupan broj događaja sa dva fotona:  "<< primaryCutEvents<< endl;
-
-	preselectionEfficiency << "ukupan broj događaja:  "<< totalEvents<< ",  broj događaja posle cut-va:  "<< totalCutEvents<<endl;
-	preselectionEfficiency<< "pT > " << minPt1 <<", "<< minInvMass<<" < M < " << maxInvMass << ", leptonPt > "<< leptonPt << ", cone Angle < "<< 2*coneAngle << ", efikasnost = "<<percentagePt1 <<endl;
-	preselectionEfficiency << "preselection efficiency: " << percentagePreselectionCuts <<endl;
-	preselectionEfficiency << "efficiency ERemaining: " << percentageEremaining <<endl;
-	preselectionEfficiency << "efficiency cosinus helicity: " << percentageCosinusHelicity <<endl;
-	preselectionEfficiency << "efficiency Higgs Energy: " << percentageEhiggs <<endl;
-	preselectionEfficiency << "efficiency Higgs Pt: " << percentageHiggsPt <<endl;
-	preselectionEfficiency << "efficiency Higgs invariant mass: " << percentageHiggsInvMass <<endl;
-	preselectionEfficiency << "________________________________________________"<<endl;
-	preselectionEfficiency.close();
-
-	ofstream coneEnergyEff;
-	coneEnergyEff.open("coneEnergyEff.txt",ios_base::out | ios_base::app);
-	coneEnergyEff<< "0.1 cone Energy:"<<percentageConeEnergy22<<endl;
-	coneEnergyEff<< "1 cone Energy:"<<percentageConeEnergy24<<endl;
-	coneEnergyEff<< "2 cone Energy:"<<percentageConeEnergy26<<endl;
-	coneEnergyEff<< "4 cone Energy:"<<percentageConeEnergy28<<endl;
-	coneEnergyEff<< "6 cone Energy:"<<percentageConeEnergy30<<endl;
-	coneEnergyEff<< "8 cone Energy:"<<percentageConeEnergy35<<endl;
-	coneEnergyEff<< "10 cone Energy:"<<percentageConeEnergy40<<endl;
-	coneEnergyEff<< "___________________________________"<<endl;
-	coneEnergyEff.close();
-
-	ofstream angleEfficiency;
-	angleEfficiency.open("angleEff.txt",ios_base::out | ios_base::app);
-	angleEfficiency<< "theta > 2: "<< percentageAngle2<<endl;
-	angleEfficiency<< "theta > 4: "<< percentageAngle4<<endl;
-	angleEfficiency<< "theta > 6: "<< percentageAngle6<<endl;
-	angleEfficiency<< "theta > 8: "<< percentageAngle8<<endl;
-	angleEfficiency<< "theta > 10: "<< percentageAngle10<<endl;
-	angleEfficiency<< "_____________________________________"<<endl;
-
-
+	cout << "Efikasnost za d0 uslov: " << n_lep_evt_d0_cutted/n_recomc_link_lep * 100 << "%" << endl;
+	cout << "Efikasnost za z0 uslov: " << n_lep_evt_z0_cutted/n_recomc_link_lep * 100 << "%" << endl;
+	cout << "Efikasnost za r03d uslov: " << n_lep_evt_r03d_cutted/n_recomc_link_lep * 100 << "%" << endl;
+	cout << "Efikasnost za Energiju leptonskog traga uslov: " << n_lep_evt_cutted/n_recomc_link_lep * 100 << "%"  << endl;
+	cout << "Efikasnost za Ratio (Rcal) uslov: " << n_lep_evt_ratio_cutted/n_recomc_link_lep * 100 << "%" << endl;
+	cout << "Efikasnost za sve uslove: " << brojac_prezivelih_leptona/n_recomc_link_lep * 100 << "%" << endl; */
 
 	TString tfName(rfn);
+
 	if(!tfName.EndsWith(".root")) tfName.Append(".root");
+
 	TFile rootFile(tfName.Data(),"RECREATE");
-	//eventList.Write();
-
-	histoCanditateTheta.Write();
-	histoCandidatePt.Write();
-	histoCandidateM.Write();
-	histoCandidateEnergy.Write();
-	histoCandidatePhi.Write();
-	histoBoost.Write();
-	histoRemainingEnergy.Write();
-	histoHelicityAngle.Write();
-	histoHigherEnergyPhoton.Write();
-	histoLowerEnergyPhoton.Write();
-	histoZbirPt.Write();
-	energyOfPhotons.Write();
-	//histoTheta.Write();
-	//histoPhi.Write();
-	//histoangleBetweenPhotons.Write();
-	histoMissingEnergy.Write();
-	//efikasnost.Write();
-	histoPhoton1CandidateTheta.Write();
-	histoPhoton2CandidateTheta.Write();
-	histoPtof1stPhotonofCandidate.Write();
-	histoPtof2ndPhotonofCandidate.Write();
-	histoconeEnergyFilter.Write();
-	histoHighestPhotonPt.Write();
-	histo2ndHighestPhotonPt.Write();
-	histoCosinusHelicityAngle.Write();
-	histoNumberPhotonsbyEvent.Write();
-	histoCandidateMFineBinning.Write();
-	ptOfPhotons.Write();
-	PtofCandidatePhotons.Write();
-	energyofCandidatePhotons.Write();
-	thetaOfCandidatePhotons.Write();
-	energyofCandidatePhotonsZoomed.Write();
-	PtofCandidatePhotonsZoomed.Write();
-	thetaOfPhotons.Write();
-	histoconeEnergy.Write();
-	histoconeEnergyfor2Photons.Write();
-	histoECall.Write();
-	histoHCall.Write();
-	histoTotalCall.Write();
-	eventList.Write();
-	histoCallRatio.Write();
-	histoECallEvt.Write();
-	histoHCallEvt.Write();
-	histoCallRatioEvt.Write();
-	histoTotalCallEvt.Write();
-	angleBetweenPhotons.Write();
-	histoVisibleEnergy.Write();
-
-	//posle preseelkcije
-	histoCandidateM_preselectionCut.Write();
-	histoCandidatePt_preselectionCut.Write();
-	histoCandidateEnergy_preselectionCut.Write();
-	histoCanditateTheta_preselectionCut.Write();
-	histoCandidatePhi_preselectionCut.Write();
-	histoRemainingEnergy_preselectionCut.Write();
-	histoBoost_preselectionCut.Write();
-	histoPhoton1CandidateTheta_preselectionCut.Write();
-	histoPhoton2CandidateTheta_preselectionCut.Write();
-	histoPtof1stPhotonofCandidate_preselectionCut.Write();
-	histoPtof2ndPhotonofCandidate_preselectionCut.Write();
-	histoHigherEnergyPhoton_preselectionCut.Write();
-	histoLowerEnergyPhoton_preselectionCut.Write();
-	histoVisibleEnergy_preselectionCut.Write();
-	histoCosinusHelicityAngle_preselectionCut.Write();
-	histoangleBetweenPhotons_preselectionCut.Write();
 
 
-	histoInvMInvM.Write();
-	histoInvMEHigs.Write();
-	histoInvMPt.Write();
-	histoInvMPreselection.Write();
-	histoInvMErem.Write();
-	ECE.Write();
-	HCE.Write();
+	leptonTree.Write();
+//	ptTree.Write();
+	//pfoTree.Write();
 
-	ECE_NotRepr.Write();
-	HCE_NotRepr.Write();
+	//elektronskoTree.Write();
+	//elektronsko6i7Tree.Write();
+	//elektronskoRekonstrTree.Write();
 
+//	pozitronskoRekonstrTree.Write();
 
-
+	rootFile.Write();
 	rootFile.Close();
 
-/*	TCanvas c1;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c1.SetCanvasSize(1000,650);
-	c1.Divide(1,1,0.01,0.01);
-	c1.cd(1);
-	histoCandidateM.Draw();
-	c1.Print("histoCandidateM.png");
-
-	TCanvas c2;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c2.SetCanvasSize(1000,650);
-	c2.Divide(1,1,0.01,0.01);
-	c2.cd(1);
-	c2.GetPad(1)->SetLogy();
-	histoCandidatePt.Draw();
-	c2.Print("histoCandidatePt.png");
-
-	TCanvas c3;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c3.SetCanvasSize(1000,650);
-	c3.Divide(1,1,0.01,0.01);
-	c3.cd(1);
-	histoTheta.Draw();
-	c3.Print("PhotonTheta.png");
-
-	TCanvas c4;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c4.SetCanvasSize(1000,650);
-	c4.Divide(1,1,0.01,0.01);
-	c4.cd(1);
-	c4.SetLogy();
-	histoRemainingEnergy.Draw();
-	c4.Print("histoRemainingEnergy.png");
-
-	TCanvas c5;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c5.SetCanvasSize(1000,650);
-	c5.Divide(1,1,0.01,0.01);
-	c5.cd(1);
-	histoCandidateEnergy.Draw();
-	c5.Print("histoCandidateEnergy.png");
-
-	TCanvas c6;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c6.SetCanvasSize(1000,650);
-	c6.Divide(1,1,0.01,0.01);
-	c6.cd(1);
-	c6.GetPad(1)->SetLogy();
-	histoCanditateTheta.Draw();
-	c6.Print("histoCandidateTheta.png");
-
-	TCanvas c7;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c7.SetCanvasSize(1000,650);
-	c7.Divide(1,1,0.01,0.01);
-	c7.cd(1);
-	c7.GetPad(1)->SetLogy();
-	histoCandidatePhi.Draw();
-	c7.Print("histoCandidatePhi.png");
-
-	TCanvas c8;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c8.SetCanvasSize(1000,650);
-	c8.Divide(1,1,0.01,0.01);
-	c8.cd(1);
-	c8.GetPad(1)->SetLogy();
-	histoBoost.Draw();
-	c8.Print("histoCandidateBoost.png");
-
-	TCanvas c9;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c9.SetCanvasSize(1000,650);
-	c9.Divide(1,1,0.01,0.01);
-	c9.cd(1);
-	//c9.GetPad(1)->SetLogy();
-	histoHigherEnergyPhoton.Draw();
-	c9.Print("histoHigherEnergyPhoton.png");
-
-	TCanvas c10;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c10.SetCanvasSize(1000,650);
-	c10.Divide(1,1,0.01,0.01);
-	c10.cd(1);
-	//c10.GetPad(1)->SetLogy();
-	histoLowerEnergyPhoton.Draw();
-	c10.Print("histoLowerEnergyPhoton.png");
-
-	TCanvas c11;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c11.SetCanvasSize(1000,650);
-	c11.Divide(1,1,0.01,0.01);
-	c11.cd(1);
-	c11.GetPad(1)->SetLogy();
-	histoZbirPt.Draw();
-	c11.Print("histoZbirPt.png");
-
-	TCanvas c12;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c12.SetCanvasSize(1000,650);
-	c12.Divide(1,1,0.01,0.01);
-	c12.cd(1);
-	//c12.GetPad(1)->SetLogy();
-	histoHelicityAngle.Draw();
-	c12.Print("histoHelicityAngle.png");
-
-	TCanvas c13;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c13.SetCanvasSize(1000,650);
-	c13.Divide(1,1,0.01,0.01);
-	c13.cd(1);
-	//c13.GetPad(1)->SetLogy();
-	histoconeEnergy.Draw();
-	c13.Print("Cone_Energy.png");
-
-	TCanvas c14;
-	gStyle->SetOptStat(111111);
-	gStyle->SetPalette( 1 );
-	c14.SetCanvasSize(1000,650);
-	c14.Divide(1,1,0.01,0.01);
-	c14.cd(1);
-	//c13.GetPad(1)->SetLogy();
-	energyOfPhotons.Draw();
-	c14.Print("energyOfPhotons.png");
-
-	TCanvas c15;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c15.SetCanvasSize(1000,650);
-	c15.Divide(1,1,0.01,0.01);
-	c15.cd(1);
-	//c15.GetPad(1)->SetLogy();
-	histoPhi.Draw();
-	c15.Print("PhotonPhi.png");
-
-	TCanvas c16;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c16.SetCanvasSize(1000,650);
-	c16.Divide(1,1,0.01,0.01);
-	c16.cd(1);
-	//c15.GetPad(1)->SetLogy();
-	histogram.Draw();//colz
-	c16.Print("ISR.png");
-
-	TCanvas c17;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c17.SetCanvasSize(1000,650);
-	c17.Divide(1,1,0.01,0.01);
-	c17.cd(1);
-	//c15.GetPad(1)->SetLogy();
-	histoangleBetweenPhotons.Draw();
-	c17.Print("angleBetweenPhotons.png");
-
-	TCanvas c18;
-	gStyle->SetPalette( 1 );
-	c18.SetCanvasSize(1000,650);
-	c18.Divide(1,1,0.01,0.01);
-	c18.cd(1);
-	//c18.GetPad(1)->SetLogy();
-	gStyle->SetOptStat(111111);
-	histoNumberPhotonsbyEvent.Draw();
-	c18.Print("NumberPhotonsbyEvnt.png");
-
-	TCanvas c19;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c19.SetCanvasSize(1000,650);
-	c19.Divide(1,1,0.01,0.01);
-	c19.cd(1);
-	//c19.GetPad(1)->SetLogy();
-	anglePhotonParticle.Draw();
-	c19.Print("PhotonParticleAngle.png");
-
-	TCanvas c20;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c20.SetCanvasSize(1000,650);
-	c20.Divide(1,1,0.01,0.01);
-	c20.cd(1);
-	//c20.GetPad(1)->SetLogy();
-	anglePhotonParticlewE.Draw();
-	c20.Print("PhotonParticleAngleWE.png");
-
-	TCanvas c21;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c21.SetCanvasSize(1000,650);
-	c21.Divide(1,1,0.01,0.01);
-	c21.cd(1);
-	//c13.GetPad(1)->SetLogy();
-	histoconeEnergyFilter.Draw();
-	c21.Print("Cone_Energy_Filter.png");
-
-	TCanvas c22;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c22.SetCanvasSize(1000,650);
-	c22.Divide(1,1,0.01,0.01);
-	c22.cd(1);
-	//c13.GetPad(1)->SetLogy();
-	histoHardPhotonsByEvent.Draw();
-	c22.Print("HardPhotonsByEvent.png");
-
-	TCanvas c23;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c23.SetCanvasSize(1000,650);
-	c23.Divide(1,1,0.01,0.01);
-	c23.cd(1);
-	c23.GetPad(1)->SetLogy();
-	histoPtOtherParticles.Draw();
-	c23.Print("histoPtOtherParticles.png");
-
-	TCanvas c24;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c24.SetCanvasSize(1000,650);
-	c24.Divide(1,1,0.01,0.01);
-	c24.cd(1);
-	//c24.GetPad(1)->SetLogy();
-	histoMissingEnergy.Draw();
-	c24.Print("histoMissingEnergy.png");
-
-	TCanvas c25;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c25.SetCanvasSize(1000,650);
-	c25.Divide(1,1,0.01,0.01);
-	c25.cd(1);
-	//c24.GetPad(1)->SetLogy();
-	histoTestPt.Draw();
-	c25.Print("histoTestPt.png");
-
-
-	TCanvas c26;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c26.SetCanvasSize(1000,650);
-	c26.Divide(1,1,0.01,0.01);
-	c26.cd(1);
-	c26.SetTitle("Signal");
-		//c24.GetPad(1)->SetLogy();
-	efikasnostproba.Draw("AL*");
-	c26.Print("efikasnostPhotonPT.png");
-
-	TCanvas c27;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c27.SetCanvasSize(1000,650);
-	c27.Divide(1,1,0.01,0.01);
-	c27.cd(1);
-	//c27.SetTitle("Signal");
-		//c24.GetPad(1)->SetLogy();
-	histoPhoton1CandidateTheta.Draw();
-	c27.Print("Thetaof1stPhotonofCandidate.png");
-
-	TCanvas c28;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(0);
-	c28.SetCanvasSize(1000,650);
-	c28.Divide(1,1,0.01,0.01);
-	c28.cd(1);
-	//c28.SetTitle("Signal");
-		//c24.GetPad(1)->SetLogy();
-	histoPhoton2CandidateTheta.Draw();
-	c28.Print("Thetaof2ndPhotonofCandidate.png");
-
-	TCanvas c29;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c29.SetCanvasSize(1000,650);
-	c29.Divide(1,1,0.01,0.01);
-	c29.cd(1);
-	//c28.SetTitle("Signal");
-		//c24.GetPad(1)->SetLogy();
-	histoPtof1stPhotonofCandidate.Draw();
-	c29.Print("Ptof1stPhotonofCandidate.png");
-
-
-	TCanvas c30;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c30.SetCanvasSize(1000,650);
-	c30.Divide(1,1,0.01,0.01);
-	c30.cd(1);
-	//c28.SetTitle("Signal");
-		//c24.GetPad(1)->SetLogy();
-	histoPtof2ndPhotonofCandidate.Draw();
-	c30.Print("Ptof2ndPhotonofCandidate.png");
-
-	TCanvas c31;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c31.SetCanvasSize(1000,650);
-	c31.Divide(1,1,0.01,0.01);
-	c31.cd(1);
-	//c28.SetTitle("Signal");
-		//c24.GetPad(1)->SetLogy();
-	histoPtof2ndPhotonofCandidate.Draw();
-	c31.Print("histoHighestPhotonPt.png");
-
-	TCanvas c32;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c32.SetCanvasSize(1000,650);
-	c32.Divide(1,1,0.01,0.01);
-	c32.cd(1);
-	//c28.SetTitle("Signal");
-		//c24.GetPad(1)->SetLogy();
-	histo2ndHighestPhotonPt.Draw("");
-	c32.Print("histo2ndHighestPhotonPt.png");
-
-	TCanvas c33;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c33.SetCanvasSize(1000,650);
-	c33.Divide(1,1,0.01,0.01);
-	c33.cd(1);
-	//c33.SetTitle("Signal");
-		//c33.GetPad(1)->SetLogy();
-	histo2ndHighestPhotonPtZoomed.Draw();
-	c33.Print("histo2ndHighestPhotonPtZoomed.png");
-
-	TCanvas c34;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c34.SetCanvasSize(1000,650);
-	c34.Divide(1,1,0.01,0.01);
-	c34.cd(1);
-	//c33.SetTitle("Signal");
-		//c33.GetPad(1)->SetLogy();
-	histoVisibleEnergy.Draw();
-	c34.Print("histoVisibleEnergy.png");
-
-	TCanvas c35;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(0);
-	c35.SetCanvasSize(1000,650);
-	c35.Divide(1,1,0.01,0.01);
-	c35.cd(1);
-	//c33.SetTitle("Signal");
-		//c33.GetPad(1)->SetLogy();
-	histoZbirImpulsa.Draw();
-	c35.Print("histoZbirImpulsa.png");
-
-
-	TCanvas c36;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c36.SetCanvasSize(1000,650);
-	c36.Divide(1,1,0.01,0.01);
-	c36.cd(1);
-	//c33.SetTitle("Signal");
-	c36.GetPad(1)->SetLogy();
-	histoCosinusHelicityAngle.Draw();
-	c36.Print("cosinusHelicityAngle.png");
-
-
-	TCanvas c37;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c37.SetCanvasSize(1000,650);
-	c37.Divide(1,1,0.01,0.01);
-	c37.cd(1);
-	//c33.SetTitle("Signal");
-	//c37.GetPad(1)->SetLogy();
-	histoCandidateMFineBinning.Draw();
-	c37.Print("CandidateMFineBinning.png");
-
-	TCanvas c38;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c38.SetCanvasSize(1000,650);
-	c38.Divide(1,1,0.01,0.01);
-	c38.cd(1);
-	//c33.SetTitle("Signal");
-	c38.GetPad(1)->SetLogy();
-	ptOfPhotons.Draw();
-	c38.Print("ptOfPhotons.png");
-
-	TCanvas c39;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c39.SetCanvasSize(1000,650);
-	c39.Divide(1,1,0.01,0.01);
-	c39.cd(1);
-	//c33.SetTitle("Signal");
-	c39.GetPad(1)->SetLogy();
-	PtofCandidatePhotons.Draw();
-	c39.Print("PtofCandidatePhotons.png");
-
-	TCanvas c40;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c40.SetCanvasSize(1000,650);
-	c40.Divide(1,1,0.01,0.01);
-	c40.cd(1);
-	//c33.SetTitle("Signal");
-	c40.GetPad(1)->SetLogy();
-	energyofCandidatePhotons.Draw();
-	c40.Print("energyofCandidatePhotons.png");
-
-	TCanvas c41;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c41.SetCanvasSize(1000,650);
-	c41.Divide(1,1,0.01,0.01);
-	c41.cd(1);
-	//c33.SetTitle("Signal");
-	c41.GetPad(1)->SetLogy();
-	thetaOfCandidatePhotons.Draw();
-	c41.Print("ThetaofCandidatePhotons.png");
-
-	TCanvas c42;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c42.SetCanvasSize(1000,650);
-	c42.Divide(1,1,0.01,0.01);
-	c42.cd(1);
-	//c33.SetTitle("Signal");
-	c42.GetPad(1)->SetLogy();
-	energyofCandidatePhotonsZoomed.Draw();
-	c42.Print("energyofCandidatePhotonsZoomed.png");
-
-	TCanvas c43;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c43.SetCanvasSize(1000,650);
-	c43.Divide(1,1,0.01,0.01);
-	c43.cd(1);
-	//c33.SetTitle("Signal");
-	c43.GetPad(1)->SetLogy();
-	PtofCandidatePhotonsZoomed.Draw();
-	c43.Print("PtofCandidatePhotonsZoomed.png");
-
-	TCanvas c44;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c44.SetCanvasSize(1000,650);
-	c44.Divide(1,1,0.01,0.01);
-	c44.cd(1);
-	//c33.SetTitle("Signal");
-	c44.GetPad(1)->SetLogy();
-	histoconeEnergyfor2Photons.Draw();
-	c44.Print("histoconeEnergyfor2Photons.png");
-
-	TCanvas c45;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c45.SetCanvasSize(1000,650);
-	c45.Divide(1,1,0.01,0.01);
-	c45.cd(1);
-	//c33.SetTitle("Signal");
-	c45.GetPad(1)->SetLogy();
-	histoECall.Draw();
-	c45.Print("ECall.png");
-
-	TCanvas c46;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c46.SetCanvasSize(1000,650);
-	c46.Divide(1,1,0.01,0.01);
-	c46.cd(1);
-	//c33.SetTitle("Signal");
-	c46.GetPad(1)->SetLogy();
-	histoHCall.Draw();
-	c46.Print("HCall.png");
-
-	TCanvas c47;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c47.SetCanvasSize(1000,650);
-	c47.Divide(1,1,0.01,0.01);
-	c47.cd(1);
-	//c33.SetTitle("Signal");
-	c47.GetPad(1)->SetLogy();
-	histoTotalCall.Draw();
-	c47.Print("TotalCall.png");
-
-	TCanvas c48;
-	gStyle->SetPalette( 1 );
-	gStyle->SetOptStat(111111);
-	c48.SetCanvasSize(1000,650);
-	c48.Divide(1,1,0.01,0.01);
-	c48.cd(1);
-	//c33.SetTitle("Signal");
-	c48.GetPad(1)->SetLogy();
-	histoCallRatio.Draw();
-	c48.Print("callRatio.png");*/
-
 	return 0;
-}
 
+} // Kraj slcio2appTree funkcije
 
+// -----------------------------------------------------------------------------------------------------------------------------
 
 Int_t main(int argc, char* argv[])
 {
 	Int_t iarg = 1;
-	UInt_t nFirstJob = 1;
-	if(argc>iarg) nFirstJob = atoi(argv[iarg]); iarg++;
-	UInt_t nLastJob = 10;
-	if(argc>iarg) nLastJob   = atoi(argv[iarg]); iarg++;
 
-	TString fName = "ee_rem_col_";
-	if(argc>iarg) fName = argv[iarg]; iarg++;
+	UInt_t nPrviFajl = 1;
+	if(argc > iarg)
+	{
+		nPrviFajl = atoi(argv[iarg]);
+		iarg++;
+	}
 
-	TString rfName = "app.root";
-	if(argc>iarg) rfName = argv[iarg]; iarg++;
+	UInt_t nZadnjiFajl = 50;    //  < ------------------------------------
+	if(argc > iarg)
+	{
+		nZadnjiFajl  = atoi(argv[iarg]);
+		iarg++;
+	}
 
-	return slcio2appTree(nFirstJob, nLastJob, fName.Data(), rfName.Data());
+	TString fName = "test_";    // < -----------------------------------------
+	if(argc > iarg)
+	{
+		 fName = argv[iarg]; 	// iarg++;
+	}
+
+	TString rfName = "KG_Signal_izolacija_leptona_uslovi.root";  // < ------------------------------------
+
+	if(argc > iarg) rfName = argv[0];
+
+	return slcio2appTree(nPrviFajl, nZadnjiFajl, fName.Data(), rfName.Data());
 }
