@@ -3,7 +3,7 @@
  * 	Read reconstructed photons from a  .slcio file, and draws histograms for different variables
  *
  *  Author:Goran Kačarević
- *  15.10.2015.
+ *  15.10.2015. test
  *
  *
  ***********************************************************/
